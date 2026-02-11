@@ -174,8 +174,8 @@ class Ball:
     Enthält Position, Geschwindigkeit, Form und Kollisionslogik
     """
     def __init__(self, x, y):
-        self.reset_position(x, y)
         self.base_speed = 5
+        self.reset_position(x, y)
         self.speed_x = self.base_speed
         self.speed_y = self.base_speed
         self.radius = 10
