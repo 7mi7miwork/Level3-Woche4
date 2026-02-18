@@ -25,10 +25,8 @@ import math
 import sys
 import json
 import os
-import array
 
 pygame.init()
-pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
 
 # ── Konstanten ──────────────────────────────────────────────────────────────
 SCREEN_WIDTH  = 1200
@@ -67,52 +65,13 @@ COLOR_OPTIONS = {
 
 SAVE_FILE = "pong_save.json"
 
-# ── Sound-Generierung ────────────────────────────────────────────────────────
-def generate_sound(frequency, duration_ms, volume=0.3, wave='sine'):
-    """Generiert einen Ton prozedural ohne externe Audiodateien."""
-    sample_rate = 44100
-    n_samples   = int(sample_rate * duration_ms / 1000)
-    buf = array.array('h', [0] * n_samples)
-    for i in range(n_samples):
-        t = i / sample_rate
-        if wave == 'sine':
-            val = math.sin(2 * math.pi * frequency * t)
-        elif wave == 'square':
-            val = 1.0 if math.sin(2 * math.pi * frequency * t) > 0 else -1.0
-        elif wave == 'noise':
-            val = random.uniform(-1, 1)
-        else:
-            val = math.sin(2 * math.pi * frequency * t)
-        # Fade-out
-        fade = 1.0 - (i / n_samples) ** 0.5
-        buf[i] = int(val * volume * fade * 32767)
-    sound = pygame.sndarray.make_sound(buf)
-    return sound
-
+# ── Sound (deaktiviert) ────────────────────────────────────────────────────
 class SoundManager:
-    """Verwaltet alle Spielgeräusche."""
+    """Stumme Version – kein Mixer benötigt."""
     def __init__(self):
-        self.enabled = True
-        self.volume  = 0.5
-        self._sounds = {}
-        self._build()
-
-    def _build(self):
-        self._sounds['hit']      = generate_sound(440, 80,  0.4, 'sine')
-        self._sounds['wall']     = generate_sound(220, 60,  0.3, 'sine')
-        self._sounds['score']    = generate_sound(150, 400, 0.5, 'square')
-        self._sounds['powerup']  = generate_sound(880, 200, 0.4, 'sine')
-        self._sounds['shield']   = generate_sound(660, 120, 0.35,'square')
-        self._sounds['win']      = generate_sound(523, 600, 0.5, 'sine')
-        self._sounds['achieve']  = generate_sound(1046,300, 0.5, 'sine')
-
+        self.enabled = False
     def play(self, name):
-        if self.enabled and name in self._sounds:
-            try:
-                self._sounds[name].set_volume(self.volume)
-                self._sounds[name].play()
-            except Exception:
-                pass
+        pass
 
 # ── Statistiken & Achievements ───────────────────────────────────────────────
 ACHIEVEMENTS = {
