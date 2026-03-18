@@ -233,6 +233,10 @@ ACHIEVEMENTS = [
      lambda g: getattr(g,"_survived_dep",False)),
     ("legend",  "Legende",           "Nettovermoegen > 100 Mio €",
      lambda g: g.net_worth() >= 100_000_000),
+    ("fullhouse","Vollvermieter",     "Alle Immobilien gleichzeitig vermietet (mind. 3)",
+     lambda g: len(g.props) >= 3 and all(not p["vacant"] for p in g.props)),
+    ("premium", "Premium-Vermieter", "Luxusmieter in einer Immobilie",
+     lambda g: any(p.get("tenant")==3 for p in g.props)),
 ]
 
 
@@ -305,7 +309,7 @@ class GS:
         return v + self.etf * self.etf_price
 
     def monthly_income(self):
-        i  = sum(p["rent"] for p in self.props if not p.get("vacant"))
+        i  = sum(p["rent"] for p in self.props if not p["vacant"])
         i += sum(c["profit"] for c in self.comps)
         i += sum(qty * self.stock_data[sid]["price"] * self.stock_data[sid]["div"] / 12
                  for sid, qty in self.stocks.items() if qty > 0)
@@ -331,11 +335,30 @@ class GS:
 # ─────────────────────────────────────────────────────
 #  SPIELLOGIK (Monatstick)
 # ─────────────────────────────────────────────────────
+TENANT_TYPES = [
+    # (name, rent_bonus_frac, damage_risk, contract_months)
+    ("Privat-Mieter",  0.00, 0.03, 12),
+    ("Student",       -0.10, 0.10,  6),
+    ("Firmenkunde",   +0.25, 0.05, 24),
+    ("Luxusmieter",   +0.40, 0.04, 18),
+    ("Sozialmieter",  -0.20, 0.01, 36),
+]
+
 def make_prop(catalog_row):
     tid, name, icon, price, rent, maint, lvl_max = catalog_row
-    return {"id":tid,"name":name,"icon":icon,"price":float(price),
-            "rent":float(rent),"maint":float(maint),
-            "level":1,"lvl_max":lvl_max,"vacant":False}
+    return {
+        "id": tid, "name": name, "icon": icon,
+        "price":     float(price),
+        "base_rent": float(rent),
+        "rent":      float(rent),
+        "maint":     float(maint),
+        "level": 1, "lvl_max": lvl_max,
+        "vacant":  True,       # startet unvermietet
+        "listed":  False,      # auf dem Markt angeboten
+        "tenant":  None,       # aktiver Mietertyp-Index oder None
+        "contract_left": 0,    # verbleibende Monate
+        "rent_hist": [],       # letzte 24 Monate Mieteinnahmen
+    }
 
 def make_comp(catalog_row):
     tid, name, icon, price, profit, maint, risk, lvl_max = catalog_row
@@ -362,13 +385,48 @@ def tick(gs: GS):
 
     # ── Immobilien ──
     for p in gs.props:
-        if p["vacant"] and random.random() < 0.25:
-            p["vacant"] = False   # Mieter zurück
+        # Mietvertrag abgelaufen
+        if p["tenant"] is not None and p["contract_left"] > 0:
+            p["contract_left"] -= 1
+            if p["contract_left"] == 0:
+                tname = TENANT_TYPES[p["tenant"]][0]
+                gs.add_log(f"Mietvertrag abgelaufen: {p['name']} ({tname})", "warn")
+                p["tenant"]  = None
+                p["vacant"]  = True
+                p["listed"]  = False
+
+        # Wenn angeboten: zufällig Mieter finden (Wahrscheinlichkeit nach Wirtschaftslage)
+        if p["listed"] and p["vacant"]:
+            chance = {"BOOM":0.55,"STABLE":0.40,"RECESSION":0.25,
+                      "DEPRESSION":0.10,"STAGFLATION":0.20,"HYPERINFLATION":0.15}.get(gs.phase, 0.30)
+            if random.random() < chance:
+                # Mietertyp zufällig wählen (gewichtet)
+                weights = [4, 3, 2, 1, 2]
+                ti = random.choices(range(len(TENANT_TYPES)), weights=weights)[0]
+                tname, bonus, _, months = TENANT_TYPES[ti]
+                p["tenant"]        = ti
+                p["vacant"]        = False
+                p["contract_left"] = months
+                p["rent"]          = p["base_rent"] * (1 + bonus)
+                gs.add_log(f"Neuer Mieter: {tname} in {p['name']} ({months} Monate)", "good")
+
+        # Mietschaden durch schwierige Mieter
+        if not p["vacant"] and p["tenant"] is not None:
+            dmg_risk = TENANT_TYPES[p["tenant"]][2]
+            if random.random() < dmg_risk * 0.4:
+                dmg = p["maint"] * (0.5 + random.random())
+                expenses += dmg
+                gs.add_log(f"Mieterschaden in {p['name']}: -{fmt(dmg)}", "bad")
+
         rent = p["rent"] * (1 + ph["rent"]) if not p["vacant"] else 0.0
         income   += rent
         expenses += p["maint"]
-        p["price"] *= 1 + gs.inflation*0.7 + (0.004 if gs.phase=="BOOM" else -0.001)
-        p["rent"]  *= 1 + gs.inflation*0.35
+        p["rent_hist"].append(round(rent))
+        if len(p["rent_hist"]) > 24: p["rent_hist"].pop(0)
+        p["price"]     *= 1 + gs.inflation*0.7 + (0.004 if gs.phase=="BOOM" else -0.001)
+        p["base_rent"] *= 1 + gs.inflation*0.35
+        if not p["vacant"]:
+            p["rent"] *= 1 + gs.inflation*0.35
 
     # ── Unternehmen ──
     rep_bonus = (gs.reputation - 50) / 2000.0
@@ -518,10 +576,14 @@ def _ev_fire(gs):
     gs.add_news("Feuer in der Innenstadt — Immobilienschaeden!")
 
 def _ev_vacancy(gs):
-    if not gs.props: return
-    p = random.choice(gs.props)
-    p["vacant"] = True
-    gs.add_log(f"Mieter ausgefallen: {p['name']}", "bad")
+    occupied = [p for p in gs.props if not p["vacant"]]
+    if not occupied: return
+    p = random.choice(occupied)
+    tname = TENANT_TYPES[p["tenant"]][0] if p["tenant"] is not None else "Mieter"
+    p["tenant"]        = None
+    p["vacant"]        = True
+    p["contract_left"] = 0
+    gs.add_log(f"{tname} ausgezogen: {p['name']} jetzt leer", "bad")
 
 def _ev_lawsuit(gs):
     if not gs.comps: return
@@ -698,6 +760,7 @@ class GameScreen:
             "buy_prop":    self._open_buy_prop,
             "sell_prop":   self._open_sell_prop,
             "upg_prop":    self._open_upg_prop,
+            "rent_prop":   self._open_rent_prop,
             "buy_comp":    self._open_buy_comp,
             "sell_comp":   self._open_sell_comp,
             "upg_comp":    self._open_upg_comp,
@@ -734,6 +797,11 @@ class GameScreen:
     def _open_upg_prop(self):
         self._inputs = {}
         self.modal = {"type":"upg_prop"}
+        self._scroll = 0
+
+    def _open_rent_prop(self):
+        self._inputs = {}
+        self.modal = {"type":"rent_prop"}
         self._scroll = 0
 
     def _open_buy_comp(self):
@@ -836,11 +904,48 @@ class GameScreen:
                         gs.cash -= cost
                         p["level"] += 1
                         p["price"] *= 1.08
-                        p["rent"]  *= 1.15
-                        p["maint"] *= 1.06
+                        p["base_rent"] *= 1.15
+                        p["rent"]      *= 1.15
+                        p["maint"]     *= 1.06
                         gs.add_log(f"Renoviert: {p['name']} Lvl {p['level']}", "good")
                     self._close_modal()
                     return None
+
+        elif mt == "rent_prop":
+            row_h = 100; y0 = by+58
+            for i, p in enumerate(gs.props):
+                ry = y0 + i*row_h - self._scroll
+                if ry+row_h < by+40 or ry > by+mh-20: continue
+                # "Anbieten"-Button (leer)
+                if p["vacant"] and not p["listed"]:
+                    if pygame.Rect(bx+mw-120, ry+20, 100, 28).collidepoint(mx,my):
+                        p["listed"] = True
+                        gs.add_log(f"{p['name']} auf Mietmarkt angeboten", "info")
+                        self._close_modal()
+                        return None
+                # "Raus werfen"-Button (belegt)
+                elif not p["vacant"]:
+                    if pygame.Rect(bx+mw-120, ry+20, 100, 28).collidepoint(mx,my):
+                        tname = TENANT_TYPES[p["tenant"]][0] if p["tenant"] is not None else "Mieter"
+                        p["tenant"]        = None
+                        p["vacant"]        = True
+                        p["listed"]        = False
+                        p["contract_left"] = 0
+                        # Strafe für vorzeitige Kuendigung
+                        penalty = p["rent"] * 2
+                        gs.cash -= penalty
+                        gs.add_log(f"{tname} rausgekuendigt: -{fmt(penalty)} Strafe", "bad")
+                        self._close_modal()
+                        return None
+                    # "Mieter wechseln" → Vertrag abwarten-Hinweis ignorieren,
+                    # Angebot-Button: Vertrag verlängern (erneut anbieten bei Ablauf)
+                # "Suche stoppen"-Button (angeboten aber noch leer)
+                elif p["vacant"] and p["listed"]:
+                    if pygame.Rect(bx+mw-120, ry+20, 100, 28).collidepoint(mx,my):
+                        p["listed"] = False
+                        gs.add_log(f"{p['name']} vom Mietmarkt genommen", "info")
+                        self._close_modal()
+                        return None
 
         elif mt == "buy_comp":
             row_h = 72; y0 = by+60
@@ -1106,6 +1211,7 @@ class GameScreen:
             ("buy_prop",   "  Kaufen"),
             ("sell_prop",  "  Verkaufen"),
             ("upg_prop",   "  Renovieren"),
+            ("rent_prop",  "  Vermieten"),
             ("__sec_comp__","Unternehmen"),
             ("buy_comp",   "  Gruenden"),
             ("sell_comp",  "  Verkaufen"),
@@ -1135,10 +1241,11 @@ class GameScreen:
             ("buy_prop",   "  Immo kaufen"),
             ("sell_prop",  "  Immo verkaufen"),
             ("upg_prop",   "  Renovieren"),
+            ("rent_prop",  "  Vermieten"),
             ("__sec_comp__","Unternehmen"),
             ("buy_comp",   "  Firma gruenden"),
             ("sell_comp",  "  Firma verkaufen"),
-            ("upg_comp",   "  Firm erweitern"),
+            ("upg_comp",   "  Firma erweitern"),
             ("__sec_fin__", "Finanzen"),
             ("loan",       "  Kredit aufnehmen"),
             ("repay",      "  Kredit tilgen"),
@@ -1150,8 +1257,14 @@ class GameScreen:
             if key.startswith("__"):
                 txt(screen, label.upper(),"xs",MUTED, 10, ry+2)
             else:
-                box(screen,PANEL2,(4,ry,182,rh),5)
-                txt(screen, label, "sm", WHITE, 12, ry+rh//2, "midleft")
+                # Highlight "Vermieten" wenn Immobilien leer sind
+                hi = (key == "rent_prop" and
+                      any(p["vacant"] for p in self.gs.props))
+                bg = (60,40,15) if hi else PANEL2
+                box(screen, bg, (4,ry,182,rh), 5)
+                if hi:
+                    box(screen, YELLOW, (4,ry,182,rh), 5, 1)
+                txt(screen, label, "sm", YELLOW if hi else WHITE, 12, ry+rh//2, "midleft")
 
     # ── TABS ──
     def _draw_tabs(self):
@@ -1204,6 +1317,29 @@ class GameScreen:
         # NW-Chart
         cy3 = y+pad+2*(ch2+pad)+8
         ch3 = h - 2*(ch2+pad) - pad*3 - 8
+
+        # Vermietungs-Statusleiste (wenn Immobilien vorhanden)
+        if gs.props:
+            bar_h = 28
+            box(screen, PANEL2, (x+pad, cy3, w-pad*2, bar_h), 6)
+            box(screen, BORDER,  (x+pad, cy3, w-pad*2, bar_h), 6, 1)
+            txt(screen, "Immobilien:", "xs", MUTED, x+pad+8, cy3+14, "midleft")
+            px2 = x+pad+90
+            for p in gs.props:
+                pw2 = min(120, (w-pad*2-100) // len(gs.props) - 4)
+                if p["vacant"] and not p["listed"]:
+                    col2, status2 = RED,    "LEER"
+                elif p["vacant"] and p["listed"]:
+                    col2, status2 = YELLOW, "Suche..."
+                else:
+                    ti = p.get("tenant")
+                    col2 = GREEN
+                    status2 = TENANT_TYPES[ti][0][:8] if ti is not None else "Vermietet"
+                box(screen, col2, (px2, cy3+4, pw2, 20), 4)
+                txt(screen, p["name"][:7], "xs", BG, px2+4, cy3+14, "midleft")
+                px2 += pw2 + 4
+            cy3 += bar_h + 6
+            ch3 -= bar_h + 6
         if ch3 > 60 and len(gs.nw_hist) >= 2:
             box(screen,PANEL2,(x+pad,cy3,w-pad*2,ch3),8)
             box(screen,BORDER,(x+pad,cy3,w-pad*2,ch3),8,1)
@@ -1385,6 +1521,7 @@ class GameScreen:
         if mt == "buy_prop":    self._draw_m_buy_prop(bx,by,mw,mh)
         elif mt == "sell_prop": self._draw_m_list_prop(bx,by,mw,mh,"Verkaufen","Verkaufen",RED)
         elif mt == "upg_prop":  self._draw_m_upg_prop(bx,by,mw,mh)
+        elif mt == "rent_prop": self._draw_m_rent_prop(bx,by,mw,mh)
         elif mt == "buy_comp":  self._draw_m_buy_comp(bx,by,mw,mh)
         elif mt == "sell_comp": self._draw_m_list_comp(bx,by,mw,mh,"Verkaufen","Verkaufen",RED)
         elif mt == "upg_comp":  self._draw_m_upg_comp(bx,by,mw,mh)
@@ -1463,6 +1600,79 @@ class GameScreen:
             else:
                 box(view,ACCENT if can else BORDER,(mw-112,ry+22,90,28),6)
                 txt(view,"Renovieren" if can else "Kein Geld","xs",WHITE,mw-67,ry+36,"center")
+
+    def _draw_m_rent_prop(self, bx, by, mw, mh):
+        gs = self.gs
+        txt(screen, "Vermietungs-Verwaltung", "lg", GOLD, bx+16, by+16)
+        txt(screen, "Biete leere Immobilien an. Mieter kommen automatisch je nach Wirtschaftslage.",
+            "xs", MUTED, bx+16, by+40)
+        if not gs.props:
+            txt(screen, "Keine Immobilien vorhanden.", "md", MUTED, bx+16, by+80)
+            return
+        row_h = 100
+        view = screen.subsurface(pygame.Rect(bx, by+54, mw, mh-64))
+        for i, p in enumerate(gs.props):
+            ry = i * row_h - self._scroll
+            if ry + row_h < 0 or ry > mh - 64: continue
+            # Hintergrund je Status
+            if p["vacant"] and not p["listed"]:
+                bg, bc = (40,25,25), RED
+            elif p["vacant"] and p["listed"]:
+                bg, bc = (40,38,15), YELLOW
+            else:
+                bg, bc = (20,40,28), GREEN
+            box(view, bg,    (8, ry, mw-16, row_h-6), 8)
+            box(view, bc,    (8, ry, mw-16, row_h-6), 8, 1)
+            pygame.draw.rect(view, bc, (8, ry, 5, row_h-6), border_radius=2)
+
+            # Name + Level
+            txt(view, f"{p['name']}  Lvl {p['level']}", "lg", WHITE, 22, ry+10)
+
+            # Status-Badge
+            if p["vacant"] and not p["listed"]:
+                status = "LEER"
+                sc = RED
+            elif p["vacant"] and p["listed"]:
+                status = "SUCHE MIETER..."
+                sc = YELLOW
+            else:
+                ti = p["tenant"]
+                tname = TENANT_TYPES[ti][0] if ti is not None else "Mieter"
+                status = f"VERMIETET: {tname}  ({p['contract_left']} Monate)"
+                sc = GREEN
+            txt(view, status, "sm", sc, 22, ry+34)
+
+            # Mietdetails
+            if not p["vacant"]:
+                txt(view, f"Miete: {fmt(p['rent'])}/Monat", "xs", CYAN, 22, ry+54)
+                txt(view, f"Netto: {fmt(p['rent']-p['maint'])}/Monat", "xs", GREEN, 200, ry+54)
+                # Mini-Sparkline der letzten Mietzahlungen
+                if len(p["rent_hist"]) >= 2:
+                    sparkline(view, p["rent_hist"], 22, ry+68, 200, 22, GREEN)
+            else:
+                txt(view, f"Basis-Miete: {fmt(p['base_rent'])}/Monat", "xs", MUTED, 22, ry+54)
+                txt(view, f"Kosten laufen: -{fmt(p['maint'])}/Monat", "xs", RED, 200, ry+54)
+
+            # Mietertypen-Vorschau (nur wenn leer)
+            if p["vacant"] and not p["listed"]:
+                x_off = 400
+                txt(view, "Moegl. Mieter:", "xs", MUTED, x_off, ry+10)
+                for ti2, (tname2, bonus, _, months) in enumerate(TENANT_TYPES):
+                    col2 = GREEN if bonus >= 0 else RED
+                    sign = "+" if bonus >= 0 else ""
+                    txt(view, f"{tname2}: {sign}{bonus*100:.0f}% ({months}M)",
+                        "xs", col2, x_off, ry+24+ti2*14)
+
+            # Aktionsbutton
+            if p["vacant"] and not p["listed"]:
+                box(view, GREEN,  (mw-128, ry+20, 108, 30), 6)
+                txt(view, "Anbieten", "sm", BG, mw-74, ry+35, "center")
+            elif p["vacant"] and p["listed"]:
+                box(view, YELLOW, (mw-128, ry+20, 108, 30), 6)
+                txt(view, "Suche stoppen", "xs", BG, mw-74, ry+35, "center")
+            else:
+                box(view, RED,    (mw-128, ry+20, 108, 30), 6)
+                txt(view, "Kuendigen (-2M)", "xs", WHITE, mw-74, ry+35, "center")
 
     def _draw_m_buy_comp(self, bx, by, mw, mh):
         gs = self.gs
