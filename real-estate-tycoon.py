@@ -1010,26 +1010,32 @@ class GameScreen:
         return None
 
     def _handle_stock_click(self, mx, my):
-        """Klick in Aktien-Tab → öffne Buy/Sell."""
-        gs = self.gs
-        cx, cy2 = 192, 46+32+8
-        pad, col_w = 10, (W-192-pad*3)//2
+        """Klick in Aktien-Tab → öffne Buy/Sell Modal."""
+        gs  = self.gs
+        # Exakt gleiche Koordinaten wie in _tab_stocks
+        x   = 188
+        y   = 76          # Tab-Content startet bei y=76
+        pad = 10
+        col_w = (W - x - pad * 3) // 2
         row_h = 62
-        sids = list(gs.stock_data.keys())
+        sids  = list(gs.stock_data.keys())
+
         for i, sid in enumerate(sids):
-            rx = cx+pad + (i%2)*(col_w+pad)
-            ry = cy2 + (i//2)*row_h
-            r  = pygame.Rect(rx, ry, col_w, row_h-4)
-            if r.collidepoint(mx,my):
-                # Links-Hälfte → Kaufen, Rechts-Hälfte → Verkaufen
-                if mx < rx + col_w*0.65:
+            rx = x + pad + (i % 2) * (col_w + pad)
+            ry = y + 18   + (i // 2) * row_h
+            r  = pygame.Rect(rx, ry, col_w, row_h - 4)
+            if r.collidepoint(mx, my):
+                # Linke 65% → Kaufen, Rest → Verkaufen
+                if mx < rx + col_w * 0.65:
                     self._open_buy_stock(sid)
                 else:
                     self._open_sell_stock(sid)
                 return
+
         # ETF-Bereich
-        ey = cy2 + (len(sids)//2 + (1 if len(sids)%2 else 0))*row_h + 10
-        if pygame.Rect(cx+pad, ey, W-192-pad*2, 70).collidepoint(mx,my):
+        n_rows = (len(sids) // 2) + (1 if len(sids) % 2 else 0)
+        ey = y + 18 + n_rows * row_h + 8
+        if pygame.Rect(x + pad, ey, W - x - pad * 2, 70).collidepoint(mx, my):
             self._open_buy_etf()
 
     # ── Mausrad für Modal-Scroll ──
