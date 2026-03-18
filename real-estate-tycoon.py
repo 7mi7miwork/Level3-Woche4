@@ -1,1933 +1,1718 @@
 """
-╔══════════════════════════════════════════════════════════════╗
-║           BUSINESS TYCOON PRO  —  by Michael (其米）          ║
-║          Wirtschaftssimulation mit pygame GUI                 ║
-║                                                              ║
-║  Installation:  pip install pygame                           ║
-║  Starten:       python business_tycoon.py                    ║
-╚══════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════╗
+║    BUSINESS TYCOON PRO  —  by Michael (其米）         ║
+║    pip install pygame  →  python business_tycoon.py  ║
+╚══════════════════════════════════════════════════════╝
 """
 
-import pygame
-import random
-import math
-import sys
-import os
+import pygame, random, sys, math
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict
 
-# ── Farben ──────────────────────────────────────────────────────
-C = {
-    "bg":      (10, 14, 26),
-    "panel":   (17, 24, 39),
-    "panel2":  (31, 41, 55),
-    "border":  (55, 65, 81),
-    "accent":  (59, 130, 246),
-    "accent2": (139, 92, 246),
-    "green":   (16, 185, 129),
-    "red":     (239, 68, 68),
-    "yellow":  (245, 158, 11),
-    "cyan":    (6, 182, 212),
-    "gold":    (251, 191, 36),
-    "white":   (243, 244, 246),
-    "muted":   (107, 114, 128),
-    "orange":  (249, 115, 22),
-    "pink":    (236, 72, 153),
-}
+# ─────────────────────────────────────────────────────
+#  FARBEN
+# ─────────────────────────────────────────────────────
+BG      = (10,  14,  26)
+PANEL   = (17,  24,  39)
+PANEL2  = (31,  41,  55)
+BORDER  = (55,  65,  81)
+ACCENT  = (59, 130, 246)
+GREEN   = (16, 185, 129)
+RED     = (239, 68,  68)
+YELLOW  = (245,158,  11)
+CYAN    = (6,  182, 212)
+GOLD    = (251,191,  36)
+WHITE   = (240,240, 248)
+MUTED   = (107,114, 128)
+ORANGE  = (249,115,  22)
+PURPLE  = (139, 92, 246)
 
 pygame.init()
-W, H = 1280, 780
+W, H = 1280, 760
 screen = pygame.display.set_mode((W, H), pygame.RESIZABLE)
-pygame.display.set_caption("💼 Business Tycoon Pro — by Michael (其米）")
+pygame.display.set_caption("Business Tycoon Pro — by Michael (其米）")
 clock = pygame.time.Clock()
 
-# ── Schriften ─────────────────────────────────────────────────
-def make_fonts():
-    return {
-        "tiny":  pygame.font.SysFont("segoeui", 11),
-        "sm":    pygame.font.SysFont("segoeui", 13),
-        "md":    pygame.font.SysFont("segoeui", 15),
-        "lg":    pygame.font.SysFont("segoeui", 18, bold=True),
-        "xl":    pygame.font.SysFont("segoeui", 24, bold=True),
-        "title": pygame.font.SysFont("segoeui", 30, bold=True),
-    }
+# ─────────────────────────────────────────────────────
+#  SCHRIFTEN  (Fallback wenn segoeui fehlt)
+# ─────────────────────────────────────────────────────
+def _f(size, bold=False):
+    for name in ["segoeui","arial","freesansbold" if bold else "freesans","sans"]:
+        try:
+            return pygame.font.SysFont(name, size, bold=bold)
+        except:
+            pass
+    return pygame.font.Font(None, size)
 
-fonts = make_fonts()
-
-
-# ══════════════════════════════════════════════════════════════
-#  HILFSFUNKTIONEN
-# ══════════════════════════════════════════════════════════════
-def fmt(n: float) -> str:
-    if abs(n) >= 1e9: return f"{n/1e9:.2f} Mrd €"
-    if abs(n) >= 1e6: return f"{n/1e6:.2f} Mio €"
-    if abs(n) >= 1e3: return f"{n/1e3:.1f}k €"
-    return f"{n:,.0f} €".replace(",", ".")
-
-def draw_text(surf, text, font_key, color, x, y, anchor="topleft", max_width=0):
-    f = fonts[font_key]
-    if max_width and f.size(text)[0] > max_width:
-        while f.size(text + "…")[0] > max_width and len(text) > 1:
-            text = text[:-1]
-        text += "…"
-    s = f.render(text, True, color)
-    r = s.get_rect(**{anchor: (x, y)})
-    surf.blit(s, r)
-    return r
-
-def draw_rect(surf, color, rect, radius=6, alpha=None):
-    if alpha:
-        s = pygame.Surface((rect[2], rect[3]), pygame.SRCALPHA)
-        pygame.draw.rect(s, (*color, alpha), (0, 0, rect[2], rect[3]), border_radius=radius)
-        surf.blit(s, (rect[0], rect[1]))
-    else:
-        pygame.draw.rect(surf, color, rect, border_radius=radius)
-
-def draw_border(surf, color, rect, width=1, radius=6):
-    pygame.draw.rect(surf, color, rect, width, border_radius=radius)
-
-def lerp_color(a, b, t):
-    return tuple(int(a[i] + (b[i]-a[i])*t) for i in range(3))
-
-def spark_color(val, hist):
-    if len(hist) < 2: return C["muted"]
-    return C["green"] if hist[-1] >= hist[-2] else C["red"]
-
-def draw_sparkline(surf, hist, x, y, w, h, color=None):
-    if len(hist) < 2: return
-    mn, mx = min(hist), max(hist)
-    if mx == mn: mx = mn + 1
-    pts = []
-    for i, v in enumerate(hist):
-        px = x + int(i / (len(hist)-1) * w)
-        py = y + h - int((v - mn) / (mx - mn) * h)
-        pts.append((px, py))
-    if color is None:
-        color = C["green"] if hist[-1] >= hist[0] else C["red"]
-    if len(pts) >= 2:
-        pygame.draw.lines(surf, color, False, pts, 2)
-
-def draw_bar(surf, x, y, w, h, frac, color, bg=None):
-    bg = bg or C["border"]
-    draw_rect(surf, bg, (x, y, w, h), radius=3)
-    fw = max(0, min(w, int(w * frac)))
-    if fw > 0:
-        draw_rect(surf, color, (x, y, fw, h), radius=3)
-
-
-# ══════════════════════════════════════════════════════════════
-#  DATEN-KLASSEN
-# ══════════════════════════════════════════════════════════════
-@dataclass
-class Property:
-    type_id: str
-    name: str
-    icon: str
-    price: float
-    rent: float
-    maint: float
-    level: int = 1
-    lvl_max: int = 5
-    vacant: bool = False
-
-    @property
-    def net_monthly(self):
-        return (0 if self.vacant else self.rent) - self.maint
-
-    def upgrade_cost(self):
-        return self.price * 0.12
-
-    def upgrade(self):
-        if self.level < self.lvl_max:
-            self.level += 1
-            self.price  *= 1.08
-            self.rent   *= 1.15
-            self.maint  *= 1.06
-
-    def sell_value(self):
-        return self.price * 0.94
-
-
-@dataclass
-class Company:
-    type_id: str
-    name: str
-    icon: str
-    base_price: float
-    base_profit: float
-    maint: float
-    risk: float
-    level: int = 1
-    lvl_max: int = 8
-
-    def __post_init__(self):
-        self.profit = self.base_profit
-        self.valuation = self.base_price
-
-    def upgrade_cost(self):
-        return self.valuation * 0.15
-
-    def upgrade(self):
-        if self.level < self.lvl_max:
-            self.level += 1
-            self.valuation  *= 1.12
-            self.base_profit *= 1.22
-            self.profit = self.base_profit
-            self.maint  *= 1.08
-
-    def sell_value(self):
-        return self.valuation * 0.88
-
-
-@dataclass
-class Stock:
-    sid: str
-    name: str
-    icon: str
-    price: float
-    vol: float
-    div: float       # Jahres-Dividendenrendite
-    sector: str
-    hist: List[float] = field(default_factory=list)
-    bought_avg: float = 0.0
-
-
-@dataclass
-class Crypto:
-    cid: str
-    name: str
-    icon: str
-    price: float
-    vol: float
-    hist: List[float] = field(default_factory=list)
-    bought_avg: float = 0.0
-
-
-# ══════════════════════════════════════════════════════════════
-#  SPIELZUSTAND
-# ══════════════════════════════════════════════════════════════
-class GameState:
-    def __init__(self):
-        self.name = "Investor"
-        self.cash = 50_000.0
-        self.loan = 0.0
-        self.loan_rate = 0.006       # monatlich (variabel)
-        self.savings = 0.0
-        self.savings_rate = 0.004    # monatlich Festgeld
-
-        self.properties: List[Property] = []
-        self.companies:  List[Company] = []
-        self.stock_qty:  Dict[str, float] = {}   # sid -> qty
-        self.crypto_qty: Dict[str, float] = {}   # cid -> qty
-        self.etf_shares: float = 0.0
-
-        self.month = 1
-        self.year  = 2024
-        self.inflation = 0.002       # monatlich
-
-        self.reputation = 50         # 0–100
-        self.tax_rate   = 0.25
-        self.achievements_earned = set()
-        self.log: List[tuple] = []   # (text, type)
-        self.news: List[str] = []
-        self.net_worth_hist: List[float] = []
-        self.cash_flow_hist: List[float] = []
-
-        # Wirtschaft
-        self.econ_phase    = "STABLE"
-        self.econ_duration = 8
-        self.interest_rate = 5.0     # Leitzins p.a. %
-        self.gdp_growth    = 2.0
-        self.unemployment  = 5.0
-        self.market_sent   = 50.0    # 0–100
-
-        # Markt-Objekte
-        self.stocks: List[Stock] = [
-            Stock("tg",   "TechGiant",    "💻", 150.0,  0.13, 0.005,  "Tech"),
-            Stock("ac",   "AutoCorp",     "🚗",  85.0,  0.09, 0.018,  "Auto"),
-            Stock("ec",   "EnergyCo",     "⚡", 110.0,  0.07, 0.022,  "Energy"),
-            Stock("bg",   "BankGroup",    "🏦",  65.0,  0.11, 0.012,  "Finance"),
-            Stock("ph",   "PharmaHealth", "💊", 200.0,  0.10, 0.008,  "Health"),
-            Stock("re",   "RealEstCorp",  "🏘",  90.0,  0.08, 0.025,  "RE"),
-            Stock("ai",   "AI-Ventures",  "🤖", 350.0,  0.25, 0.001,  "Tech"),
-            Stock("food", "FoodChain",    "🍔",  45.0,  0.06, 0.030,  "Food"),
-        ]
-        self.etf_price = 100.0
-        self.etf_hist:  List[float] = []
-
-        self.cryptos: List[Crypto] = [
-            Crypto("btc",  "Bitcoin",  "₿",  45000.0, 0.30),
-            Crypto("eth",  "Ethereum", "Ξ",   2800.0, 0.28),
-            Crypto("doge", "Dogecoin", "🐕",     0.12, 0.55),
-            Crypto("sol",  "Solana",   "◎",    120.0, 0.38),
-        ]
-
-    # ── Berechnungen ──────────────────────────────────────────
-    def net_worth(self):
-        v = self.cash + self.savings
-        for p in self.properties:  v += p.price
-        for c in self.companies:   v += c.valuation
-        for s in self.stocks:      v += self.stock_qty.get(s.sid, 0) * s.price
-        v += self.etf_shares * self.etf_price
-        for c in self.cryptos:     v += self.crypto_qty.get(c.cid, 0) * c.price
-        v -= self.loan
-        return v
-
-    def stock_portfolio_value(self):
-        v = sum(self.stock_qty.get(s.sid, 0) * s.price for s in self.stocks)
-        return v + self.etf_shares * self.etf_price
-
-    def crypto_portfolio_value(self):
-        return sum(self.crypto_qty.get(c.cid, 0) * c.price for c in self.cryptos)
-
-    def monthly_income(self):
-        i = 0.0
-        for p in self.properties:
-            if not p.vacant: i += p.rent
-        for c in self.companies: i += c.profit
-        for s in self.stocks:    i += self.stock_qty.get(s.sid, 0) * s.price * (s.div / 12)
-        i += self.etf_shares * self.etf_price * (0.002 / 12)
-        i += self.savings * self.savings_rate
-        return i
-
-    def monthly_expenses(self):
-        e = 0.0
-        for p in self.properties: e += p.maint
-        for c in self.companies:  e += c.maint
-        e += self.loan * (self.loan_rate + self.interest_rate / 100 / 12)
-        return e
-
-    def add_log(self, text, kind="info"):
-        self.log.insert(0, (text, kind))
-        if len(self.log) > 60: self.log.pop()
-
-    def add_news(self, text):
-        self.news.insert(0, text)
-        if len(self.news) > 20: self.news.pop()
-
-
-# ══════════════════════════════════════════════════════════════
-#  WIRTSCHAFTS-ENGINE
-# ══════════════════════════════════════════════════════════════
-PHASES = {
-    "BOOM":          {"label": "Boom 🚀",          "color": C["green"],  "stock": +0.04, "rent": +0.02, "profit": +0.05},
-    "STABLE":        {"label": "Stabil ➖",         "color": C["cyan"],   "stock":  0.00, "rent":  0.00, "profit":  0.00},
-    "RECESSION":     {"label": "Rezession 📉",      "color": C["yellow"], "stock": -0.03, "rent": -0.01, "profit": -0.03},
-    "DEPRESSION":    {"label": "Depression 🆘",     "color": C["red"],    "stock": -0.08, "rent": -0.03, "profit": -0.08},
-    "STAGFLATION":   {"label": "Stagflation 🌪",    "color": C["orange"], "stock": -0.02, "rent": +0.01, "profit": -0.04},
-    "HYPERINFLATION":{"label": "Hyperinflation 💥", "color": C["pink"],   "stock": +0.01, "rent": +0.06, "profit": -0.06},
+F = {
+    "xs":  _f(11), "sm": _f(13), "md": _f(15),
+    "lg":  _f(17, True), "xl": _f(22, True), "title": _f(28, True),
 }
 
-PROP_CATALOG = [
-    ("flat",   "Kleine Wohnung",    "🏢",   75_000,   550,    90, 5),
-    ("house",  "Einfamilienhaus",   "🏠",  240_000,  1300,   270, 5),
-    ("condo",  "Luxus-Penthouse",   "🌆",  650_000,  4000,   600, 5),
-    ("office", "Bürogebäude",       "🏣", 1_200_000, 9000,  1400, 5),
-    ("mall",   "Einkaufszentrum",   "🛍", 3_000_000,25000,  3500, 5),
-    ("hotel",  "Luxus-Hotel",       "🏨", 5_000_000,40000,  6000, 5),
-]
+# ─────────────────────────────────────────────────────
+#  HILFSFUNKTIONEN
+# ─────────────────────────────────────────────────────
+def fmt(n: float) -> str:
+    n = float(n)
+    if abs(n) >= 1e9:  return f"{n/1e9:.2f} Mrd €"
+    if abs(n) >= 1e6:  return f"{n/1e6:.2f} Mio €"
+    if abs(n) >= 1e3:  return f"{n/1e3:.1f}k €"
+    return f"{n:,.0f} €".replace(",",".")
 
-COMP_CATALOG = [
-    ("cafe",    "Café / Kiosk",       "☕",    15_000,    280,    40, 0.05, 8),
-    ("craft",   "Handwerksbetrieb",   "🔧",    80_000,   1100,   180, 0.05, 8),
-    ("retail",  "Einzelhandel",        "🛒",   200_000,   2500,   400, 0.08, 8),
-    ("tech",    "Software-Startup",   "💻",   500_000,   7000,   800, 0.12, 8),
-    ("factory", "Fabrik",              "🏭", 1_500_000,  18000,  2800, 0.06, 8),
-    ("media",   "Medienkonzern",       "📺", 4_000_000,  50000,  8000, 0.10, 8),
-    ("pharma",  "Pharmaunternehmen",   "💊", 8_000_000, 110000, 15000, 0.14, 8),
-    ("bank2",   "Investmentbank",      "🏦",20_000_000, 300000, 40000, 0.18, 8),
-]
+def txt(surf, text, fkey, color, x, y, anchor="topleft", maxw=0):
+    f = F[fkey]
+    s = str(text)
+    if maxw > 0:
+        while f.size(s)[0] > maxw and len(s) > 1:
+            s = s[:-1]
+        if s != str(text): s += "…"
+    surf_t = f.render(s, True, color)
+    r = surf_t.get_rect(**{anchor: (x, y)})
+    surf.blit(surf_t, r)
+    return r
 
-RANDOM_EVENTS = [
-    # (Wahrscheinlichkeit pro Monat, Beschreibung, Effekt-Funktion)
-    (0.025, "Feuer in Immobilie!",           "bad",
-        lambda gs: _prop_damage(gs, 0.07, "Feuer-Schaden")),
-    (0.020, "Mieter zahlt nicht!",           "bad",
-        lambda gs: _rent_loss(gs)),
-    (0.015, "Betriebsklage gegen Firma!",    "bad",
-        lambda gs: _company_lawsuit(gs)),
-    (0.020, "Staatliche Förderung!",         "good",
-        lambda gs: _subsidy(gs)),
-    (0.008, "Marktcrash! Alle Aktien -20%.", "bad",
-        lambda gs: _market_crash(gs, 0.80)),
-    (0.008, "Bullenmarkt! Aktien +15%.",     "good",
-        lambda gs: _market_rally(gs, 1.15)),
-    (0.015, "Schlechte Presse: Ruf -12.",    "bad",
-        lambda gs: setattr(gs, "reputation", max(0, gs.reputation - 12))),
-    (0.015, "Award: Ruf +10.",               "good",
-        lambda gs: setattr(gs, "reputation", min(100, gs.reputation + 10))),
-    (0.010, "Steuerprüfung: -5% Bargeld.",   "bad",
-        lambda gs: _tax_audit(gs)),
-    (0.015, "Infrastrukturprojekt: Immo +10% Wert.", "good",
-        lambda gs: _infra_boost(gs)),
-    (0.012, "Krypto-Mania! Kurse explodieren.", "good",
-        lambda gs: _crypto_mania(gs)),
-    (0.010, "Regulierung: Firmengewinn -15%.",  "bad",
-        lambda gs: _regulation(gs)),
-    (0.008, "Zinssenkung: Kreditrate sinkt.",    "good",
-        lambda gs: setattr(gs, "interest_rate", max(0, gs.interest_rate - 0.5))),
-    (0.008, "Zinserhöhung: Kreditrate steigt.",  "bad",
-        lambda gs: setattr(gs, "interest_rate", min(15, gs.interest_rate + 0.5))),
-]
+def box(surf, color, rect, r=6, width=0):
+    pygame.draw.rect(surf, color, rect, width, border_radius=r)
 
-def _prop_damage(gs, frac, label):
-    if not gs.properties: return
-    p = random.choice(gs.properties)
-    dmg = p.price * frac
-    gs.cash -= dmg
-    p.price -= dmg
-    gs.add_log(f"🔥 {p.name}: {label} -{fmt(dmg)}", "bad")
-    gs.add_news(f"🔥 Feuer in der Stadt! Immobilienschäden verzeichnet.")
+def line(surf, color, p1, p2):
+    pygame.draw.line(surf, color, p1, p2)
 
-def _rent_loss(gs):
-    if not gs.properties: return
-    p = random.choice(gs.properties)
-    p.vacant = True
-    gs.add_log(f"🚫 {p.name}: Mieter ausgefallen!", "bad")
+def sparkline(surf, hist, x, y, w, h, col=None):
+    if len(hist) < 2: return
+    mn, mx2 = min(hist), max(hist)
+    if mx2 == mn: mx2 = mn + 0.001
+    pts = [(x + int(i/(len(hist)-1)*w),
+            y + h - int((v-mn)/(mx2-mn)*h))
+           for i, v in enumerate(hist)]
+    c = col or (GREEN if hist[-1] >= hist[0] else RED)
+    if len(pts) >= 2:
+        pygame.draw.lines(surf, c, False, pts, 2)
 
-def _company_lawsuit(gs):
-    if not gs.companies: return
-    c = random.choice(gs.companies)
-    pen = c.valuation * 0.08
-    gs.cash -= pen
-    gs.add_log(f"⚖️ Klage vs {c.name}: -{fmt(pen)}", "bad")
+def progress_bar(surf, x, y, w, h, frac, color):
+    box(surf, PANEL2, (x,y,w,h), 3)
+    fw = max(0, min(w, int(w*frac)))
+    if fw > 0: box(surf, color, (x,y,fw,h), 3)
 
-def _subsidy(gs):
-    amt = 10_000 + random.random() * 50_000
-    gs.cash += amt
-    gs.add_log(f"🏅 Förderprogramm: +{fmt(amt)}", "good")
-
-def _market_crash(gs, factor):
-    for s in gs.stocks: s.price *= factor * (0.9 + random.random() * 0.2)
-    gs.add_log("💥 Marktcrash! Aktienportfolio stark gefallen.", "bad")
-    gs.add_news("📉 Schwarzer Dienstag: Börsen brechen ein!")
-
-def _market_rally(gs, factor):
-    for s in gs.stocks: s.price *= factor * (0.95 + random.random() * 0.1)
-    gs.add_log("🚀 Bullenmarkt! Aktien gestiegen.", "good")
-    gs.add_news("📈 Rekordhoch: Märkte feiern!")
-
-def _tax_audit(gs):
-    amt = gs.cash * 0.05
-    gs.cash -= amt
-    gs.add_log(f"📋 Sondersteuerprüfung: -{fmt(amt)}", "bad")
-
-def _infra_boost(gs):
-    if not gs.properties: return
-    p = random.choice(gs.properties)
-    p.price *= 1.10
-    gs.add_log(f"🏗 Stadtentwicklung: {p.name} +10%", "good")
-
-def _crypto_mania(gs):
-    for c in gs.cryptos:
-        if random.random() < 0.6:
-            c.price *= 1.2 + random.random() * 0.8
-    gs.add_log("₿ Krypto-Mania! Kurse explodieren.", "good")
-
-def _regulation(gs):
-    for c in gs.companies:
-        c.profit *= 0.85
-        c.base_profit *= 0.85
-    gs.add_log("📜 Neue Regulierung: Unternehmensgewinne -15%", "bad")
-
-# Erfolge
-ACHIEVEMENTS = [
-    ("first_step",     "🏁 Erste Schritte",     "Kaufe deine erste Immobilie oder Firma",       lambda gs: len(gs.properties)+len(gs.companies) >= 1),
-    ("millionaire",    "💎 Millionär",           "Nettovermögen > 1 Mio €",                      lambda gs: gs.net_worth() >= 1_000_000),
-    ("ten_million",    "👑 Zehnfach-Millionär",  "Nettovermögen > 10 Mio €",                     lambda gs: gs.net_worth() >= 10_000_000),
-    ("hundred_m",      "🚀 Centurion",           "Nettovermögen > 100 Mio €",                    lambda gs: gs.net_worth() >= 100_000_000),
-    ("debt_free",      "✅ Schuldenfrei",         "Tilge alle Schulden",                          lambda gs: gs.loan == 0 and len(gs.net_worth_hist) > 6),
-    ("landlord",       "🏘 Vermieter",            "Besitze 3+ Immobilien",                        lambda gs: len(gs.properties) >= 3),
-    ("mogul",          "🏭 Mogul",               "Besitze 5+ Unternehmen",                       lambda gs: len(gs.companies) >= 5),
-    ("stock_whale",    "📈 Aktionär",            "Aktienportfolio > 500k €",                     lambda gs: gs.stock_portfolio_value() >= 500_000),
-    ("crypto_bull",    "₿ Krypto-König",         "Krypto-Portfolio > 100k €",                    lambda gs: gs.crypto_portfolio_value() >= 100_000),
-    ("diversified",    "🎯 Diversifiziert",      "In alle 4 Kategorien investiert",               lambda gs: len(gs.properties)>0 and len(gs.companies)>0 and gs.stock_portfolio_value()>0 and gs.crypto_portfolio_value()>0),
-    ("reputation_100", "⭐ Legende",             "Reputation auf 100 gebracht",                  lambda gs: gs.reputation >= 100),
-    ("big_spender",    "💸 Big Spender",         "Mehr als 1 Mio € in einem Kauf ausgegeben",    lambda gs: getattr(gs, '_big_spend', False)),
-    ("survivor",       "💪 Krisenüberlebender",  "Eine Depression überlebt",                     lambda gs: getattr(gs, '_survived_depression', False)),
-]
+def dim_overlay(surf):
+    s = pygame.Surface((surf.get_width(), surf.get_height()), pygame.SRCALPHA)
+    s.fill((0,0,0,170))
+    surf.blit(s,(0,0))
 
 
-# ══════════════════════════════════════════════════════════════
-#  UI KOMPONENTEN
-# ══════════════════════════════════════════════════════════════
-class Button:
-    def __init__(self, x, y, w, h, text, color=None, text_color=None,
-                 font="sm", radius=6, icon=""):
-        self.rect = pygame.Rect(x, y, w, h)
-        self.text = text
-        self.icon = icon
-        self.color = color or C["accent"]
-        self.text_color = text_color or C["white"]
-        self.font = font
-        self.radius = radius
-        self.hovered = False
-        self.disabled = False
-
-    def draw(self, surf):
-        col = self.color
-        if self.disabled:
-            col = C["border"]
-        elif self.hovered:
-            col = tuple(min(255, c + 30) for c in self.color)
-        draw_rect(surf, col, self.rect, self.radius)
-        label = (self.icon + " " if self.icon else "") + self.text
-        draw_text(surf, label, self.font, self.text_color,
-                  self.rect.centerx, self.rect.centery, anchor="center")
-
-    def update(self, pos):
-        self.hovered = self.rect.collidepoint(pos) and not self.disabled
-
-    def clicked(self, event):
-        return (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
-                and self.rect.collidepoint(event.pos) and not self.disabled)
-
-
-class ScrollList:
-    """Scrollbares Panel für Listen."""
-    def __init__(self, x, y, w, h):
-        self.rect = pygame.Rect(x, y, w, h)
-        self.scroll_y = 0
-        self.content_h = 0
-        self.surf = pygame.Surface((w, max(h, 1)), pygame.SRCALPHA)
-
-    def begin(self):
-        self.surf.fill((0, 0, 0, 0))
-        self.content_h = 0
-        return self.surf
-
-    def end(self, target_surf):
-        max_scroll = max(0, self.content_h - self.rect.h)
-        self.scroll_y = max(0, min(self.scroll_y, max_scroll))
-        target_surf.blit(self.surf, (self.rect.x, self.rect.y),
-                         (0, self.scroll_y, self.rect.w, self.rect.h))
-        # Scrollbar
-        if max_scroll > 0:
-            ratio = self.rect.h / self.content_h
-            bar_h = max(20, int(self.rect.h * ratio))
-            bar_y = int(self.scroll_y / max_scroll * (self.rect.h - bar_h))
-            pygame.draw.rect(target_surf, C["border"],
-                             (self.rect.right - 4, self.rect.y + bar_y, 3, bar_h), border_radius=2)
-
-    def scroll(self, dy):
-        self.scroll_y -= dy * 25
-
-
+# ─────────────────────────────────────────────────────
+#  INPUT-BOX
+# ─────────────────────────────────────────────────────
 class InputBox:
-    def __init__(self, x, y, w, h, placeholder="", numeric=True):
-        self.rect = pygame.Rect(x, y, w, h)
-        self.text = ""
-        self.placeholder = placeholder
+    def __init__(self, x, y, w, h=34, hint="", numeric=True):
+        self.rect  = pygame.Rect(x, y, w, h)
+        self.hint  = hint
+        self.text  = ""
+        self.active= False
         self.numeric = numeric
-        self.active = False
 
-    def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            self.active = self.rect.collidepoint(event.pos)
-        if event.type == pygame.KEYDOWN and self.active:
-            if event.key == pygame.K_BACKSPACE:
-                self.text = self.text[:-1]
-            elif event.key == pygame.K_RETURN:
-                pass
-            else:
-                ch = event.unicode
+    def handle(self, ev):
+        if ev.type == pygame.MOUSEBUTTONDOWN:
+            self.active = self.rect.collidepoint(ev.pos)
+        if ev.type == pygame.KEYDOWN and self.active:
+            if ev.key == pygame.K_BACKSPACE: self.text = self.text[:-1]
+            elif ev.unicode.isprintable():
+                ch = ev.unicode
                 if self.numeric:
-                    if ch.isdigit() or (ch == '.' and '.' not in self.text):
+                    if ch.isdigit() or (ch=='.' and '.' not in self.text):
                         self.text += ch
                 else:
                     self.text += ch
 
-    def value(self):
+    def val(self):
         try: return float(self.text)
         except: return 0.0
 
     def draw(self, surf):
-        col = C["accent"] if self.active else C["border"]
-        draw_rect(surf, C["panel2"], self.rect, 5)
-        draw_border(surf, col, self.rect, 1, 5)
-        txt = self.text if self.text else self.placeholder
-        color = C["white"] if self.text else C["muted"]
-        draw_text(surf, txt, "md", color,
-                  self.rect.x + 8, self.rect.centery, anchor="midleft")
+        col = ACCENT if self.active else BORDER
+        box(surf, PANEL2, self.rect, 5)
+        box(surf, col, self.rect, 5, 1)
+        show = self.text if self.text else self.hint
+        color = WHITE if self.text else MUTED
+        txt(surf, show, "sm", color, self.rect.x+8, self.rect.centery, "midleft")
+
+    def clear(self):
+        self.text = ""
 
 
-# ══════════════════════════════════════════════════════════════
-#  HAUPT-SPIEL
-# ══════════════════════════════════════════════════════════════
-class Game:
-    TAB_NAMES = ["📊 Dashboard", "🌍 Wirtschaft", "📈 Märkte",
-                 "₿ Krypto", "🏆 Erfolge", "📜 Log"]
+# ─────────────────────────────────────────────────────
+#  BUTTON
+# ─────────────────────────────────────────────────────
+class Btn:
+    def __init__(self, x, y, w, h, label, color=None, tc=WHITE, fkey="sm"):
+        self.rect  = pygame.Rect(x, y, w, h)
+        self.label = label
+        self.color = color or ACCENT
+        self.tc    = tc
+        self.fkey  = fkey
+        self.hover = False
 
+    def draw(self, surf):
+        c = tuple(min(255,v+25) for v in self.color) if self.hover else self.color
+        box(surf, c, self.rect, 6)
+        txt(surf, self.label, self.fkey, self.tc,
+            self.rect.centerx, self.rect.centery, "center")
+
+    def update(self, pos):
+        self.hover = self.rect.collidepoint(pos)
+
+    def hit(self, ev):
+        return (ev.type == pygame.MOUSEBUTTONDOWN
+                and ev.button == 1
+                and self.rect.collidepoint(ev.pos))
+
+
+# ─────────────────────────────────────────────────────
+#  SPIELZUSTAND-DATEN
+# ─────────────────────────────────────────────────────
+PROP_CATALOG = [
+    # (id, name, icon, price, rent, maint, lvl_max)
+    ("flat",   "Kleine Wohnung",   "Wohnung",   75_000,    550,    90, 5),
+    ("house",  "Einfamilienhaus",  "Haus",     240_000,  1_300,   270, 5),
+    ("condo",  "Luxus-Penthouse",  "Penthouse",650_000,  4_000,   600, 5),
+    ("office", "Bürogebäude",      "Büro",   1_200_000,  9_000, 1_400, 5),
+    ("mall",   "Einkaufszentrum",  "Mall",   3_000_000, 25_000, 3_500, 5),
+    ("hotel",  "Luxus-Hotel",      "Hotel",  5_000_000, 40_000, 6_000, 5),
+]
+
+COMP_CATALOG = [
+    # (id, name, icon, price, profit, maint, risk, lvl_max)
+    ("cafe",    "Café / Kiosk",       "Café",       15_000,      280,    40, 0.05, 8),
+    ("craft",   "Handwerksbetrieb",   "Handwerk",   80_000,    1_100,   180, 0.05, 8),
+    ("retail",  "Einzelhandel",        "Handel",    200_000,    2_500,   400, 0.08, 8),
+    ("tech",    "Software-Startup",   "Software",  500_000,    7_000,   800, 0.12, 8),
+    ("factory", "Fabrik",              "Fabrik",  1_500_000,   18_000, 2_800, 0.06, 8),
+    ("media",   "Medienkonzern",       "Medien",  4_000_000,   50_000, 8_000, 0.10, 8),
+    ("pharma",  "Pharmaunternehmen",   "Pharma",  8_000_000,  110_000,15_000, 0.14, 8),
+    ("ibank",   "Investmentbank",      "Bank",   20_000_000,  300_000,40_000, 0.18, 8),
+]
+
+STOCK_CATALOG = [
+    # (sid, name, price, vol, div_pa, sector)
+    ("tg",   "TechGiant",    150.0, 0.13, 0.005, "Tech"),
+    ("ac",   "AutoCorp",      85.0, 0.09, 0.018, "Auto"),
+    ("ec",   "EnergyCo",     110.0, 0.07, 0.022, "Energie"),
+    ("bg",   "BankGroup",     65.0, 0.11, 0.012, "Finanzen"),
+    ("ph",   "PharmaHealth", 200.0, 0.10, 0.008, "Gesundheit"),
+    ("re",   "RealEstCorp",   90.0, 0.08, 0.025, "Immobilien"),
+    ("ai",   "AI-Ventures",  350.0, 0.25, 0.001, "Tech"),
+    ("food", "FoodChain",     45.0, 0.06, 0.030, "Konsum"),
+]
+
+PHASES = {
+    "BOOM":           {"label":"Boom",          "col":GREEN,  "stk":+.04, "rent":+.02, "profit":+.05},
+    "STABLE":         {"label":"Stabil",        "col":CYAN,   "stk": .00, "rent": .00, "profit": .00},
+    "RECESSION":      {"label":"Rezession",     "col":YELLOW, "stk":-.03, "rent":-.01, "profit":-.03},
+    "DEPRESSION":     {"label":"Depression",    "col":RED,    "stk":-.08, "rent":-.03, "profit":-.08},
+    "STAGFLATION":    {"label":"Stagflation",   "col":ORANGE, "stk":-.02, "rent":+.01, "profit":-.04},
+    "HYPERINFLATION": {"label":"Hyperinflation","col":(236,72,153), "stk":+.01,"rent":+.06,"profit":-.06},
+}
+
+ACHIEVEMENTS = [
+    ("first",   "Erster Kauf",       "Erste Immobilie oder Firma gekauft",
+     lambda g: len(g.props)+len(g.comps) >= 1),
+    ("millionaire","Millionaer",     "Nettovermoegen > 1 Mio €",
+     lambda g: g.net_worth() >= 1_000_000),
+    ("tenmio",  "10-Millionaer",     "Nettovermoegen > 10 Mio €",
+     lambda g: g.net_worth() >= 10_000_000),
+    ("landlord","Vermieter",         "3 oder mehr Immobilien besitzen",
+     lambda g: len(g.props) >= 3),
+    ("tycoon",  "Tycoon",            "5 oder mehr Unternehmen besitzen",
+     lambda g: len(g.comps) >= 5),
+    ("debtfree","Schuldenfrei",      "Alle Schulden getilgt",
+     lambda g: g.loan == 0 and len(g.nw_hist) > 3),
+    ("investor","Investor",          "Aktienportfolio > 200k €",
+     lambda g: g.stock_value() >= 200_000),
+    ("diversify","Diversifiziert",   "In Immobilien, Firmen UND Aktien investiert",
+     lambda g: len(g.props)>0 and len(g.comps)>0 and g.stock_value()>0),
+    ("survivor","Krisenueberlebender","Depression ueberlebt",
+     lambda g: getattr(g,"_survived_dep",False)),
+    ("legend",  "Legende",           "Nettovermoegen > 100 Mio €",
+     lambda g: g.net_worth() >= 100_000_000),
+]
+
+
+# ─────────────────────────────────────────────────────
+#  SPIELZUSTAND
+# ─────────────────────────────────────────────────────
+class GS:
+    """Gesamter Spielzustand."""
     def __init__(self):
-        self.gs = GameState()
-        self.running_game = True
-        self.paused = False
-        self.speed = 2000          # ms pro Monat
-        self.speed_idx = 0
+        self.name      = "Investor"
+        self.cash      = 50_000.0
+        self.loan      = 0.0
+        self.savings   = 0.0
+        self.sav_rate  = 0.0035    # monatlich
+        self.loan_rate = 0.006     # monatlich (variiert mit Leitzins)
+
+        self.props : List[dict] = []   # Property-Dicts
+        self.comps : List[dict] = []   # Company-Dicts
+        self.stocks: Dict[str,float] = {}   # sid -> qty
+        self.etf   : float = 0.0            # Anteile
+
+        # Marktdaten
+        self.stock_data = {
+            sid: {"name":name,"price":price,"vol":vol,
+                  "div":div,"sector":sector,"hist":[price]}
+            for sid,name,price,vol,div,sector in STOCK_CATALOG
+        }
+        self.etf_price = 100.0
+        self.etf_hist  = [100.0]
+
+        # Zeit
+        self.month = 1
+        self.year  = 2024
+
+        # Wirtschaft
+        self.phase    = "STABLE"
+        self.phase_dur= 8
+        self.base_rate= 5.0     # Leitzins %
+        self.inflation= 0.002   # monatlich
+        self.gdp      = 2.0
+        self.unemp    = 5.0
+        self.sentiment= 50.0
+
+        # Sonstiges
+        self.reputation = 50
+        self.tax_rate   = 0.25
+        self.achiev_done= set()
+        self.log  : List[tuple] = []    # (msg, kind)
+        self.news : List[str]   = []
+        self.nw_hist  : List[float] = []
+        self.cf_hist  : List[float] = []
+
+        # Flags
+        self._survived_dep = False
+
+    # ── Berechnungen ──
+    def net_worth(self):
+        v = self.cash + self.savings
+        for p in self.props: v += p["price"]
+        for c in self.comps: v += c["val"]
+        for sid, qty in self.stocks.items():
+            v += qty * self.stock_data[sid]["price"]
+        v += self.etf * self.etf_price
+        v -= self.loan
+        return v
+
+    def stock_value(self):
+        v = sum(qty * self.stock_data[sid]["price"]
+                for sid, qty in self.stocks.items() if qty > 0)
+        return v + self.etf * self.etf_price
+
+    def monthly_income(self):
+        i  = sum(p["rent"] for p in self.props if not p.get("vacant"))
+        i += sum(c["profit"] for c in self.comps)
+        i += sum(qty * self.stock_data[sid]["price"] * self.stock_data[sid]["div"] / 12
+                 for sid, qty in self.stocks.items() if qty > 0)
+        i += self.etf * self.etf_price * 0.002 / 12
+        i += self.savings * self.sav_rate
+        return i
+
+    def monthly_expenses(self):
+        e  = sum(p["maint"] for p in self.props)
+        e += sum(c["maint"] for c in self.comps)
+        e += self.loan * (self.loan_rate + self.base_rate/100/12)
+        return e
+
+    def add_log(self, msg, kind="info"):
+        self.log.insert(0, (msg, kind))
+        if len(self.log) > 80: self.log.pop()
+
+    def add_news(self, msg):
+        self.news.insert(0, msg)
+        if len(self.news) > 20: self.news.pop()
+
+
+# ─────────────────────────────────────────────────────
+#  SPIELLOGIK (Monatstick)
+# ─────────────────────────────────────────────────────
+def make_prop(catalog_row):
+    tid, name, icon, price, rent, maint, lvl_max = catalog_row
+    return {"id":tid,"name":name,"icon":icon,"price":float(price),
+            "rent":float(rent),"maint":float(maint),
+            "level":1,"lvl_max":lvl_max,"vacant":False}
+
+def make_comp(catalog_row):
+    tid, name, icon, price, profit, maint, risk, lvl_max = catalog_row
+    return {"id":tid,"name":name,"icon":icon,
+            "base_price":float(price),"val":float(price),
+            "base_profit":float(profit),"profit":float(profit),
+            "maint":float(maint),"risk":risk,
+            "level":1,"lvl_max":lvl_max}
+
+def tick(gs: GS):
+    """Einen Monat vorwärtssimulieren."""
+    gs.month += 1
+    if gs.month > 12:
+        gs.month = 1
+        gs.year += 1
+        _year_end(gs)
+
+    _update_economy(gs)
+    _update_markets(gs)
+
+    ph = PHASES[gs.phase]
+    income = 0.0
+    expenses = 0.0
+
+    # ── Immobilien ──
+    for p in gs.props:
+        if p["vacant"] and random.random() < 0.25:
+            p["vacant"] = False   # Mieter zurück
+        rent = p["rent"] * (1 + ph["rent"]) if not p["vacant"] else 0.0
+        income   += rent
+        expenses += p["maint"]
+        p["price"] *= 1 + gs.inflation*0.7 + (0.004 if gs.phase=="BOOM" else -0.001)
+        p["rent"]  *= 1 + gs.inflation*0.35
+
+    # ── Unternehmen ──
+    rep_bonus = (gs.reputation - 50) / 2000.0
+    for c in gs.comps:
+        eff = c["base_profit"] * (1 + ph["profit"] + rep_bonus)
+        c["profit"] = max(0.0, eff)
+        if random.random() < c["risk"] * 0.35:
+            dmg = c["profit"] * (0.15 + random.random()*0.25)
+            expenses += dmg
+            gs.add_log(f"Schadenfall bei {c['name']}: -{fmt(dmg)}", "bad")
+        income   += c["profit"]
+        expenses += c["maint"]
+        c["val"]         *= 1 + gs.inflation*0.4
+        c["base_profit"] *= 1 + gs.inflation*0.2
+
+    # ── Kredit ──
+    eff_rate = gs.loan_rate + gs.base_rate/100.0/12.0
+    expenses += gs.loan * eff_rate
+
+    # ── Tagesgeld ──
+    income += gs.savings * gs.sav_rate
+
+    # ── Aktiendividenden ──
+    for sid, qty in gs.stocks.items():
+        if qty > 0:
+            s = gs.stock_data[sid]
+            income += qty * s["price"] * s["div"] / 12.0
+
+    # ── ETF-Dividenden ──
+    income += gs.etf * gs.etf_price * 0.002 / 12.0
+
+    # ── Zufallsereignisse ──
+    _random_events(gs)
+
+    # ── Steuer auf Gewinn ──
+    gross = income - expenses
+    tax   = max(0.0, gross * gs.tax_rate)
+    expenses += tax
+
+    cf = income - expenses
+    gs.cash += cf
+    gs.cf_hist.append(cf)
+    gs.nw_hist.append(gs.net_worth())
+    if len(gs.cf_hist) > 24:  gs.cf_hist.pop(0)
+    if len(gs.nw_hist) > 24:  gs.nw_hist.pop(0)
+
+    gs.inflation = 0.001 + random.random()*0.004
+    if gs.phase == "HYPERINFLATION": gs.inflation *= 4
+
+    if gs.phase == "DEPRESSION" and gs.cash > 0:
+        gs._survived_dep = True
+
+    # ── Bankrott ──
+    if gs.cash < -50_000 and gs.loan > gs.net_worth()*2:
+        return "bankrott"
+    return None
+
+
+def _year_end(gs: GS):
+    gs.add_news(f"Jahresabschluss {gs.year-1}: NV {fmt(gs.net_worth())}")
+    if gs.net_worth() > 2_000_000:
+        wt = (gs.net_worth() - 2_000_000) * 0.005
+        gs.cash -= wt
+        gs.add_log(f"Vermoegenssteuer: -{fmt(wt)}", "bad")
+
+
+def _update_economy(gs: GS):
+    gs.phase_dur -= 1
+    if gs.phase_dur <= 0:
+        prev = gs.phase
+        r = random.random()
+        if   r < 0.07: gs.phase, gs.phase_dur = "DEPRESSION",     random.randint(2,5)
+        elif r < 0.22: gs.phase, gs.phase_dur = "RECESSION",      random.randint(3,7)
+        elif r < 0.28: gs.phase, gs.phase_dur = "STAGFLATION",    random.randint(2,4)
+        elif r < 0.30: gs.phase, gs.phase_dur = "HYPERINFLATION", random.randint(1,3)
+        elif r < 0.65: gs.phase, gs.phase_dur = "STABLE",         random.randint(5,10)
+        else:          gs.phase, gs.phase_dur = "BOOM",            random.randint(3,6)
+
+        if gs.phase != prev:
+            label = PHASES[gs.phase]["label"]
+            gs.add_news(f"Wirtschaftswechsel: {label}")
+            kind = "good" if gs.phase=="BOOM" else ("bad" if "DEPRESS" in gs.phase else "warn")
+            gs.add_log(f"Wirtschaft: {label}", kind)
+
+    delta = {"BOOM":+.06,"STABLE":0,"RECESSION":-.1,
+             "DEPRESSION":-.15,"STAGFLATION":0,"HYPERINFLATION":0}
+    gs.base_rate = max(0, min(15, gs.base_rate + delta.get(gs.phase,0)))
+    gs.loan_rate = 0.004 + gs.base_rate/100.0/12.0
+
+    gs.gdp   += {"BOOM":.15,"STABLE":0,"RECESSION":-.2,"DEPRESSION":-.4,
+                 "STAGFLATION":-.1,"HYPERINFLATION":-.15}.get(gs.phase,0)
+    gs.unemp += {"BOOM":-.1,"STABLE":0,"RECESSION":.25,"DEPRESSION":.5,
+                 "STAGFLATION":.1,"HYPERINFLATION":.1}.get(gs.phase,0)
+    gs.gdp   = max(-15, min(12, gs.gdp))
+    gs.unemp = max(1,   min(30, gs.unemp))
+    gs.sentiment += (random.random()-.48)*8
+    gs.sentiment  = max(0, min(100, gs.sentiment))
+
+
+def _update_markets(gs: GS):
+    ph  = PHASES[gs.phase]
+    sent= (gs.sentiment-50)/5000.0
+    sector_bonus = {
+        "Tech":("BOOM",.015), "Energie":("STAGFLATION",.02),
+        "Finanzen":("DEPRESSION",-.025), "Gesundheit":(None,.005), "Konsum":(None,.003)
+    }
+    for sid, s in gs.stock_data.items():
+        se = 0.0
+        for sec,(cond,val) in sector_bonus.items():
+            if s["sector"]==sec and (cond is None or gs.phase==cond):
+                se = val
+        chg = (random.random()-.5)*2*s["vol"] + ph["stk"] + se + sent
+        s["price"] = max(0.5, s["price"]*(1+chg))
+        s["hist"].append(round(s["price"],2))
+        if len(s["hist"]) > 40: s["hist"].pop(0)
+
+    etf_chg = (random.random()-.48)*.045 + ph["stk"]*.5
+    gs.etf_price = max(5, gs.etf_price*(1+etf_chg))
+    gs.etf_hist.append(round(gs.etf_price,2))
+    if len(gs.etf_hist) > 40: gs.etf_hist.pop(0)
+
+
+def _random_events(gs: GS):
+    events = [
+        (0.025, lambda: _ev_fire(gs)),
+        (0.020, lambda: _ev_vacancy(gs)),
+        (0.015, lambda: _ev_lawsuit(gs)),
+        (0.022, lambda: _ev_subsidy(gs)),
+        (0.008, lambda: _ev_crash(gs)),
+        (0.008, lambda: _ev_rally(gs)),
+        (0.016, lambda: _ev_bad_press(gs)),
+        (0.016, lambda: _ev_good_press(gs)),
+        (0.010, lambda: _ev_tax_audit(gs)),
+        (0.018, lambda: _ev_infra(gs)),
+        (0.010, lambda: _ev_regulation(gs)),
+    ]
+    for prob, fn in events:
+        if random.random() < prob:
+            fn()
+
+def _ev_fire(gs):
+    if not gs.props: return
+    p = random.choice(gs.props)
+    dmg = p["price"]*0.06
+    gs.cash -= dmg; p["price"] -= dmg
+    gs.add_log(f"Feuer in {p['name']}! -{fmt(dmg)}", "bad")
+    gs.add_news("Feuer in der Innenstadt — Immobilienschaeden!")
+
+def _ev_vacancy(gs):
+    if not gs.props: return
+    p = random.choice(gs.props)
+    p["vacant"] = True
+    gs.add_log(f"Mieter ausgefallen: {p['name']}", "bad")
+
+def _ev_lawsuit(gs):
+    if not gs.comps: return
+    c = random.choice(gs.comps)
+    pen = c["val"]*0.07
+    gs.cash -= pen
+    gs.add_log(f"Klage vs {c['name']}: -{fmt(pen)}", "bad")
+    gs.add_news("Unternehmen verklagt — Strafzahlung faellig!")
+
+def _ev_subsidy(gs):
+    amt = 8_000 + random.random()*45_000
+    gs.cash += amt
+    gs.add_log(f"Staatliche Foerderung: +{fmt(amt)}", "good")
+
+def _ev_crash(gs):
+    for s in gs.stock_data.values():
+        s["price"] *= 0.80 + random.random()*0.10
+    gs.add_log("Marktcrash! Alle Aktien stark gefallen.", "bad")
+    gs.add_news("CRASH: Boersenpanik! Alle Kurse eingebrochen.")
+
+def _ev_rally(gs):
+    for s in gs.stock_data.values():
+        s["price"] *= 1.10 + random.random()*0.10
+    gs.add_log("Bullenmarkt! Aktien stark gestiegen.", "good")
+    gs.add_news("Boersenrekord! Maerkte feiern Allzeithoch.")
+
+def _ev_bad_press(gs):
+    gs.reputation = max(0, gs.reputation-10)
+    gs.add_log("Schlechte Presse: Ruf -10", "bad")
+
+def _ev_good_press(gs):
+    gs.reputation = min(100, gs.reputation+8)
+    gs.add_log("Positiver Artikel: Ruf +8", "good")
+
+def _ev_tax_audit(gs):
+    amt = gs.cash*0.04
+    gs.cash -= amt
+    gs.add_log(f"Sondersteuer-Pruefung: -{fmt(amt)}", "bad")
+
+def _ev_infra(gs):
+    if not gs.props: return
+    p = random.choice(gs.props)
+    p["price"] *= 1.10
+    gs.add_log(f"Stadtentwicklung: {p['name']} +10%", "good")
+
+def _ev_regulation(gs):
+    for c in gs.comps:
+        c["profit"]      *= 0.85
+        c["base_profit"] *= 0.85
+    gs.add_log("Neue Regulierung: Firmengewinne -15%", "bad")
+    gs.add_news("Regierung beschliesst neue Unternehmensauflagen.")
+
+
+# ─────────────────────────────────────────────────────
+#  SCREEN-KLASSEN (Views)
+# ─────────────────────────────────────────────────────
+class NameScreen:
+    def __init__(self):
+        self.box = InputBox(W//2-150, H//2+10, 300, 38, "Dein Name", numeric=False)
+        self.btn = Btn(W//2-70, H//2+62, 140, 38, "Spielen", GREEN, BG, "lg")
+
+    def handle(self, ev):
+        self.box.handle(ev)
+        if self.btn.hit(ev) or (ev.type==pygame.KEYDOWN and ev.key==pygame.K_RETURN):
+            return self.box.text.strip() or "Investor"
+        return None
+
+    def draw(self, surf):
+        surf.fill(BG)
+        txt(surf,"Business Tycoon Pro","title",GOLD, W//2,H//2-100,"center")
+        txt(surf,"by Michael (其米）","md",MUTED, W//2,H//2-62,"center")
+        txt(surf,"Wie heisst du?","lg",WHITE, W//2,H//2-18,"center")
+        self.box.draw(surf)
+        self.btn.update(pygame.mouse.get_pos())
+        self.btn.draw(surf)
+
+
+# ─────────────────────────────────────────────────────
+#  HAUPTSPIEL
+# ─────────────────────────────────────────────────────
+TABS = ["Dashboard","Wirtschaft","Aktien","Erfolge","Log"]
+
+class GameScreen:
+    def __init__(self, gs: GS):
+        self.gs        = gs
+        self.tab       = 0
+        self.speed     = 2000      # ms
+        self.paused    = False
         self.last_tick = pygame.time.get_ticks()
-        self.tab = 0
-        self.modal = None          # aktives Modal
-        self._anim_flash = {}      # stat -> timer für Farbblitzen
-        self._news_x = W
-        self._ach_popup = None     # (text, timer)
-        self._modal_scroll = ScrollList(0, 0, 100, 100)
+        self.modal     = None      # aktives Modal-Dict oder None
+        self._news_x   = float(W)
+        self._ach_popup= None      # (title, desc, start_ms)
+        self._inputs   = {}        # name -> InputBox
+        self._scroll   = 0         # Scroll-Offset für Modal-Listen
 
-        # Startgeld aufstocken für bessere Spielbarkeit
-        self.gs.name = self._ask_name()
-        self.gs.add_log(f"Willkommen, {self.gs.name}! Kapital: {fmt(self.gs.cash)}", "info")
-        self.gs.add_news("🎮 Business Tycoon Pro gestartet. Viel Erfolg!")
+    # ══ HAUPT-UPDATE ══
+    def update(self):
+        pos = pygame.mouse.get_pos()
+        # Topbar-Hover
+        # Nur aktualisieren wenn kein Modal offen
+        return None
 
-    def _ask_name(self):
-        """Einfaches Name-Eingabe-Fenster vor dem Spiel."""
-        box = InputBox(W//2 - 150, H//2, 300, 36, "Dein Name", numeric=False)
-        done = False
-        name = ""
-        ok_btn = Button(W//2 - 60, H//2 + 55, 120, 34, "Starten", icon="▶")
-        while not done:
-            screen.fill(C["bg"])
-            draw_text(screen, "💼 Business Tycoon Pro", "title", C["gold"], W//2, H//2 - 80, "center")
-            draw_text(screen, "by Michael (其米）", "md", C["muted"], W//2, H//2 - 48, "center")
-            draw_text(screen, "Wie heißt du?", "lg", C["white"], W//2, H//2 - 20, "center")
-            box.draw(screen)
-            ok_btn.draw(screen)
-            pygame.display.flip()
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT: pygame.quit(); sys.exit()
-                box.handle_event(e)
-                if e.type == pygame.KEYDOWN and e.key == pygame.K_RETURN:
-                    name = box.text or "Investor"; done = True
-                if ok_btn.clicked(e):
-                    name = box.text or "Investor"; done = True
-            ok_btn.update(pygame.mouse.get_pos())
-        return name
-
-    # ── Tick ──────────────────────────────────────────────────
     def maybe_tick(self):
-        if self.paused: return
+        if self.paused or self.modal: return None
         now = pygame.time.get_ticks()
         if now - self.last_tick >= self.speed:
             self.last_tick = now
-            self._advance_month()
-
-    def _advance_month(self):
-        gs = self.gs
-        gs.month += 1
-        if gs.month > 12:
-            gs.month = 1
-            gs.year += 1
-            self._year_end()
-
-        self._update_economy()
-        self._update_markets()
-
-        phase = PHASES[gs.econ_phase]
-        income = 0.0; expenses = 0.0
-
-        # Immobilien
-        for p in gs.properties:
-            # Leerstand-Erholung
-            if p.vacant and random.random() < 0.3: p.vacant = False
-            rent = p.rent * (1 + phase["rent"]) if not p.vacant else 0
-            income   += rent
-            expenses += p.maint
-            p.price *= (1 + gs.inflation * 0.7 + (0.004 if gs.econ_phase == "BOOM" else -0.001))
-            p.rent  *= (1 + gs.inflation * 0.35)
-
-        # Unternehmen
-        for c in gs.companies:
-            rep_bonus = (gs.reputation - 50) / 2000
-            eff_profit = c.base_profit * (1 + phase["profit"] + rep_bonus)
-            c.profit = max(0, eff_profit)
-            if random.random() < c.risk * 0.4:
-                dmg = c.profit * (0.2 + random.random() * 0.3)
-                expenses += dmg
-                gs.add_log(f"⚠️ {c.name}: Betriebsschaden -{fmt(dmg)}", "bad")
-            income   += c.profit
-            expenses += c.maint
-            c.valuation *= (1 + gs.inflation * 0.5)
-            c.base_profit *= (1 + gs.inflation * 0.25)
-
-        # Kreditkosten
-        eff_rate = gs.loan_rate + gs.interest_rate / 100 / 12
-        expenses += gs.loan * eff_rate
-
-        # Tagesgeld
-        income += gs.savings * gs.savings_rate
-
-        # Aktiendividenden
-        for s in gs.stocks:
-            qty = gs.stock_qty.get(s.sid, 0)
-            if qty > 0:
-                income += qty * s.price * (s.div / 12)
-
-        # ETF-Dividenden
-        income += gs.etf_shares * gs.etf_price * (0.002 / 12)
-
-        # Ethereum-Staking
-        eth_qty = gs.crypto_qty.get("eth", 0)
-        if eth_qty > 0:
-            eth = next(c for c in gs.cryptos if c.cid == "eth")
-            income += eth_qty * eth.price * 0.0005
-
-        # Zufallsereignisse
-        for prob, desc, kind, fn in RANDOM_EVENTS:
-            if random.random() < prob:
-                fn(gs)
-                gs.add_log(f"📌 Ereignis: {desc}", kind)
-                gs.add_news(f"{'⚠️' if kind=='bad' else '✅'} {desc}")
-
-        # Steuer auf Nettogewinn
-        gross = income - expenses
-        tax = max(0, gross * gs.tax_rate)
-        expenses += tax
-
-        cf = income - expenses
-        gs.cash += cf
-        gs.cash_flow_hist.append(cf)
-        if len(gs.cash_flow_hist) > 24: gs.cash_flow_hist.pop(0)
-        gs.net_worth_hist.append(gs.net_worth())
-        if len(gs.net_worth_hist) > 24: gs.net_worth_hist.pop(0)
-
-        gs.inflation = 0.001 + random.random() * 0.004
-        if gs.econ_phase == "HYPERINFLATION": gs.inflation *= 4
-
-        # Depression überlebt
-        if gs.econ_phase == "DEPRESSION" and gs.cash > 0:
-            gs._survived_depression = True
-
-        # Bankrott-Check
-        if gs.cash < -100_000 and gs.loan > gs.net_worth() * 2:
-            self._game_over()
-            return
-
-        self._check_achievements()
-
-    def _year_end(self):
-        gs = self.gs
-        nw = gs.net_worth()
-        gs.add_news(f"📅 Jahresabschluss {gs.year-1}: NV {fmt(nw)}")
-        # Vermögenssteuer ab 2 Mio €
-        if nw > 2_000_000:
-            wt = (nw - 2_000_000) * 0.005
-            gs.cash -= wt
-            gs.add_log(f"💸 Vermögenssteuer: -{fmt(wt)}", "bad")
-
-    def _update_economy(self):
-        gs = self.gs
-        gs.econ_duration -= 1
-        if gs.econ_duration <= 0:
-            prev = gs.econ_phase
-            r = random.random()
-            if   r < 0.07: gs.econ_phase, gs.econ_duration = "DEPRESSION",    random.randint(2, 5)
-            elif r < 0.22: gs.econ_phase, gs.econ_duration = "RECESSION",     random.randint(3, 7)
-            elif r < 0.28: gs.econ_phase, gs.econ_duration = "STAGFLATION",   random.randint(2, 4)
-            elif r < 0.30: gs.econ_phase, gs.econ_duration = "HYPERINFLATION",random.randint(1, 3)
-            elif r < 0.65: gs.econ_phase, gs.econ_duration = "STABLE",        random.randint(5,10)
-            else:          gs.econ_phase, gs.econ_duration = "BOOM",           random.randint(3, 6)
-
-            if prev != gs.econ_phase:
-                label = PHASES[gs.econ_phase]["label"]
-                gs.add_news(f"🌍 Wirtschaftswechsel → {label}")
-                kind = "good" if gs.econ_phase == "BOOM" else ("bad" if "DEPRESSION" in gs.econ_phase else "warn")
-                gs.add_log(f"Wirtschaft → {label}", kind)
-
-        # Leitzins
-        if gs.econ_phase == "BOOM":         gs.interest_rate = min(12, gs.interest_rate + 0.06)
-        elif gs.econ_phase in ("RECESSION", "DEPRESSION"):
-                                            gs.interest_rate = max(0, gs.interest_rate - 0.1)
-        else:                               gs.interest_rate += (random.random()-0.5)*0.04
-        gs.interest_rate = max(0, min(15, gs.interest_rate))
-
-        gs.gdp_growth    += {"BOOM":+0.15,"STABLE":0,"RECESSION":-0.2,"DEPRESSION":-0.4,
-                             "STAGFLATION":-0.1,"HYPERINFLATION":-0.2}.get(gs.econ_phase,0)
-        gs.gdp_growth     = max(-15, min(12, gs.gdp_growth))
-        gs.unemployment  += {"BOOM":-0.15,"STABLE":0,"RECESSION":+0.25,"DEPRESSION":+0.5,
-                             "STAGFLATION":+0.1,"HYPERINFLATION":+0.1}.get(gs.econ_phase,0)
-        gs.unemployment   = max(1, min(30, gs.unemployment))
-        gs.market_sent   += (random.random()-0.48)*8
-        gs.market_sent    = max(0, min(100, gs.market_sent))
-        gs.loan_rate      = 0.004 + gs.interest_rate / 100 / 12
-
-    def _update_markets(self):
-        gs = self.gs
-        phase = PHASES[gs.econ_phase]
-        sent_mod = (gs.market_sent - 50) / 5000
-
-        sector_extra = {
-            "Tech":    0.015 if gs.econ_phase == "BOOM" else 0,
-            "Energy":  0.020 if gs.econ_phase == "STAGFLATION" else 0,
-            "Finance": -0.025 if gs.econ_phase in ("DEPRESSION","RECESSION") else 0,
-            "Health":  0.005,  # defensiv
-            "Food":    0.003,  # defensiv
-        }
-        for s in gs.stocks:
-            se = sector_extra.get(s.sector, 0)
-            chg = (random.random()-0.5)*2*s.vol + phase["stock"] + se + sent_mod
-            s.price = max(0.5, s.price * (1 + chg))
-            s.hist.append(round(s.price, 2))
-            if len(s.hist) > 40: s.hist.pop(0)
-
-        etf_chg = (random.random()-0.48)*0.045 + phase["stock"]*0.5
-        gs.etf_price = max(5, gs.etf_price * (1 + etf_chg))
-        gs.etf_hist.append(round(gs.etf_price, 2))
-        if len(gs.etf_hist) > 40: gs.etf_hist.pop(0)
-
-        crypto_boost = 0.04 if gs.econ_phase == "BOOM" else (-0.04 if gs.econ_phase == "DEPRESSION" else 0)
-        for c in gs.cryptos:
-            chg = (random.random()-0.5)*2*c.vol + crypto_boost
-            c.price = max(0.00001, c.price*(1+chg))
-            c.hist.append(round(c.price, 4))
-            if len(c.hist) > 40: c.hist.pop(0)
+            result = tick(self.gs)
+            self._check_achievements()
+            if result == "bankrott":
+                return "bankrott"
+        return None
 
     def _check_achievements(self):
+        gs = self.gs
         for aid, title, desc, cond in ACHIEVEMENTS:
-            if aid not in self.gs.achievements_earned and cond(self.gs):
-                self.gs.achievements_earned.add(aid)
-                self.gs.add_log(f"🏆 Erfolg: {title}", "good")
-                self._ach_popup = (f"🏆 {title}", desc, pygame.time.get_ticks())
+            if aid not in gs.achiev_done and cond(gs):
+                gs.achiev_done.add(aid)
+                gs.add_log(f"Erfolg: {title}", "good")
+                self._ach_popup = (title, desc, pygame.time.get_ticks())
 
-    def _game_over(self):
-        self.paused = True
-        self.modal = {"type": "gameover"}
+    # ══ EVENTS ══
+    def handle(self, ev):
+        gs = self.gs
+        # Input-Felder im Modal
+        for ib in self._inputs.values():
+            ib.handle(ev)
 
-    # ══ ZEICHNEN ══════════════════════════════════════════════
+        if ev.type == pygame.KEYDOWN:
+            if ev.key == pygame.K_ESCAPE:
+                self._close_modal()
+            if ev.key == pygame.K_SPACE and not self.modal:
+                self.paused = not self.paused
+
+        if ev.type != pygame.MOUSEBUTTONDOWN or ev.button != 1:
+            return None
+        mx, my = ev.pos
+
+        # Mausrad → scroll im Modal
+        if ev.type == pygame.MOUSEWHEEL:
+            self._scroll -= ev.y * 30
+
+        if self.modal:
+            return self._handle_modal_click(mx, my)
+
+        return self._handle_main_click(mx, my)
+
+    def _handle_main_click(self, mx, my):
+        gs = self.gs
+
+        # ─ Topbar ─
+        # Speed-Buttons  (rechts)
+        for i, (ms, lbl) in enumerate([(2000,"1x"),(800,"3x"),(300,"10x")]):
+            r = pygame.Rect(W-190+i*44, 9, 38, 26)
+            if r.collidepoint(mx,my):
+                self.speed = ms
+                return None
+        # Pause
+        if pygame.Rect(W-98,9,88,26).collidepoint(mx,my):
+            self.paused = not self.paused
+            return None
+
+        # ─ Tabs ─
+        tx = 192
+        for i, name in enumerate(TABS):
+            tw = F["sm"].size(name)[0]+22
+            if pygame.Rect(tx,46,tw,32).collidepoint(mx,my):
+                self.tab = i
+                return None
+            tx += tw+2
+
+        # ─ Sidebar Buttons ─
+        sb_clicks = {
+            "buy_prop":    self._open_buy_prop,
+            "sell_prop":   self._open_sell_prop,
+            "upg_prop":    self._open_upg_prop,
+            "buy_comp":    self._open_buy_comp,
+            "sell_comp":   self._open_sell_comp,
+            "upg_comp":    self._open_upg_comp,
+            "loan":        self._open_loan,
+            "repay":       self._open_repay,
+            "savings":     self._open_savings,
+            "buy_etf":     self._open_buy_etf,
+        }
+        for key, ry, rh in self._sidebar_rects():
+            if pygame.Rect(4, ry, 182, rh).collidepoint(mx,my):
+                if key in sb_clicks:
+                    sb_clicks[key]()
+                return None
+
+        # ─ Tab-Inhalte ─
+        if self.tab == 2:   # Aktien
+            self._handle_stock_click(mx, my)
+
+        return None
+
+    # ─────────────────────────────────────────────────
+    #  MODAL ÖFFNEN
+    # ─────────────────────────────────────────────────
+    def _open_buy_prop(self):
+        self._inputs = {}
+        self.modal = {"type":"buy_prop"}
+        self._scroll = 0
+
+    def _open_sell_prop(self):
+        self._inputs = {}
+        self.modal = {"type":"sell_prop"}
+        self._scroll = 0
+
+    def _open_upg_prop(self):
+        self._inputs = {}
+        self.modal = {"type":"upg_prop"}
+        self._scroll = 0
+
+    def _open_buy_comp(self):
+        self._inputs = {}
+        self.modal = {"type":"buy_comp"}
+        self._scroll = 0
+
+    def _open_sell_comp(self):
+        self._inputs = {}
+        self.modal = {"type":"sell_comp"}
+        self._scroll = 0
+
+    def _open_upg_comp(self):
+        self._inputs = {}
+        self.modal = {"type":"upg_comp"}
+        self._scroll = 0
+
+    def _open_loan(self):
+        self._inputs = {"amount": InputBox(0,0,220,34,"Betrag in €")}
+        self.modal = {"type":"loan"}
+
+    def _open_repay(self):
+        self._inputs = {"amount": InputBox(0,0,220,34,"Betrag in €")}
+        self.modal = {"type":"repay"}
+
+    def _open_savings(self):
+        self._inputs = {"amount": InputBox(0,0,220,34,"Betrag einzahlen")}
+        self.modal = {"type":"savings"}
+
+    def _open_buy_stock(self, sid):
+        self._inputs = {"qty": InputBox(0,0,180,34,"Anzahl Aktien")}
+        self.modal = {"type":"buy_stock","sid":sid}
+
+    def _open_sell_stock(self, sid):
+        self._inputs = {"qty": InputBox(0,0,180,34,"Anzahl verkaufen")}
+        self.modal = {"type":"sell_stock","sid":sid}
+
+    def _open_buy_etf(self):
+        self._inputs = {"qty": InputBox(0,0,180,34,"Anzahl Anteile")}
+        self.modal = {"type":"buy_etf"}
+
+    def _close_modal(self):
+        self.modal = None
+        self._inputs = {}
+
+    # ─────────────────────────────────────────────────
+    #  MODAL CLICK-HANDLER
+    # ─────────────────────────────────────────────────
+    def _handle_modal_click(self, mx, my):
+        mt = self.modal.get("type","")
+        mw, mh = 660, 520
+        bx = (W-mw)//2
+        by = (H-mh)//2
+
+        # Schließen-X
+        if pygame.Rect(bx+mw-32,by+6,24,24).collidepoint(mx,my):
+            self._close_modal()
+            return None
+
+        gs = self.gs
+
+        if mt == "buy_prop":
+            row_h = 72; y0 = by+60
+            for i, row in enumerate(PROP_CATALOG):
+                ry = y0 + i*row_h - self._scroll
+                if ry+row_h < by+40 or ry > by+mh-20: continue
+                bx2 = bx+mw-110
+                if pygame.Rect(bx2, ry+20, 90, 30).collidepoint(mx,my):
+                    price = float(row[3])
+                    if gs.cash >= price:
+                        gs.cash -= price
+                        gs.props.append(make_prop(row))
+                        gs.add_log(f"Immobilie gekauft: {row[1]} ({fmt(price)})", "good")
+                        self._check_achievements()
+                    self._close_modal()
+                    return None
+
+        elif mt == "sell_prop":
+            row_h = 64; y0 = by+58
+            for i, p in enumerate(gs.props):
+                ry = y0 + i*row_h - self._scroll
+                if ry+row_h < by+40 or ry > by+mh-20: continue
+                if pygame.Rect(bx+mw-110, ry+16, 90, 30).collidepoint(mx,my):
+                    sv = p["price"]*0.94
+                    gs.cash += sv
+                    gs.props.pop(i)
+                    gs.add_log(f"Immobilie verkauft: {p['name']} +{fmt(sv)}", "info")
+                    self._close_modal()
+                    return None
+
+        elif mt == "upg_prop":
+            row_h = 72; y0 = by+58
+            for i, p in enumerate(gs.props):
+                ry = y0 + i*row_h - self._scroll
+                if ry+row_h < by+40 or ry > by+mh-20: continue
+                cost = p["price"]*0.12
+                maxed = p["level"] >= p["lvl_max"]
+                if not maxed and pygame.Rect(bx+mw-110, ry+20, 90, 30).collidepoint(mx,my):
+                    if gs.cash >= cost:
+                        gs.cash -= cost
+                        p["level"] += 1
+                        p["price"] *= 1.08
+                        p["rent"]  *= 1.15
+                        p["maint"] *= 1.06
+                        gs.add_log(f"Renoviert: {p['name']} Lvl {p['level']}", "good")
+                    self._close_modal()
+                    return None
+
+        elif mt == "buy_comp":
+            row_h = 72; y0 = by+60
+            for i, row in enumerate(COMP_CATALOG):
+                ry = y0 + i*row_h - self._scroll
+                if ry+row_h < by+40 or ry > by+mh-20: continue
+                if pygame.Rect(bx+mw-110, ry+20, 90, 30).collidepoint(mx,my):
+                    price = float(row[3])
+                    if gs.cash >= price:
+                        gs.cash -= price
+                        gs.comps.append(make_comp(row))
+                        gs.add_log(f"Firma gegruendet: {row[1]} ({fmt(price)})", "good")
+                        self._check_achievements()
+                    self._close_modal()
+                    return None
+
+        elif mt == "sell_comp":
+            row_h = 64; y0 = by+58
+            for i, c in enumerate(gs.comps):
+                ry = y0 + i*row_h - self._scroll
+                if ry+row_h < by+40 or ry > by+mh-20: continue
+                if pygame.Rect(bx+mw-110, ry+16, 90, 30).collidepoint(mx,my):
+                    sv = c["val"]*0.88
+                    gs.cash += sv
+                    gs.comps.pop(i)
+                    gs.add_log(f"Firma verkauft: {c['name']} +{fmt(sv)}", "info")
+                    self._close_modal()
+                    return None
+
+        elif mt == "upg_comp":
+            row_h = 72; y0 = by+58
+            for i, c in enumerate(gs.comps):
+                ry = y0 + i*row_h - self._scroll
+                if ry+row_h < by+40 or ry > by+mh-20: continue
+                cost = c["val"]*0.15
+                maxed = c["level"] >= c["lvl_max"]
+                if not maxed and pygame.Rect(bx+mw-110, ry+20, 90, 30).collidepoint(mx,my):
+                    if gs.cash >= cost:
+                        gs.cash -= cost
+                        c["level"] += 1
+                        c["val"]         *= 1.12
+                        c["base_profit"] *= 1.22
+                        c["profit"]       = c["base_profit"]
+                        c["maint"]       *= 1.08
+                        gs.add_log(f"Firma erweitert: {c['name']} Lvl {c['level']}", "good")
+                    self._close_modal()
+                    return None
+
+        elif mt == "loan":
+            bx2 = bx+260; by2 = by+130
+            self._inputs["amount"].rect = pygame.Rect(bx+30, by+128, 220, 34)
+            if pygame.Rect(bx2, by2, 120, 34).collidepoint(mx,my):
+                amt = self._inputs["amount"].val()
+                max_l = max(0, gs.net_worth()*0.6 - gs.loan)
+                if 0 < amt <= max_l and gs.cash + amt > 0:
+                    gs.cash += amt
+                    gs.loan += amt
+                    gs.add_log(f"Kredit aufgenommen: +{fmt(amt)}", "warn")
+                self._close_modal()
+                return None
+
+        elif mt == "repay":
+            bx2 = bx+260; by2 = by+128
+            self._inputs["amount"].rect = pygame.Rect(bx+30, by+128, 220, 34)
+            # Teilbetrag
+            if pygame.Rect(bx2, by2, 120, 34).collidepoint(mx,my):
+                amt = min(self._inputs["amount"].val(), gs.cash, gs.loan)
+                if amt > 0:
+                    gs.cash -= amt
+                    gs.loan  = max(0, gs.loan - amt)
+                    gs.add_log(f"Kredit getilgt: -{fmt(amt)}", "good")
+                self._close_modal()
+                return None
+            # Alles tilgen
+            if pygame.Rect(bx+30, by+180, 160, 34).collidepoint(mx,my):
+                amt = min(gs.cash, gs.loan)
+                if amt > 0:
+                    gs.cash -= amt
+                    gs.loan  = max(0, gs.loan - amt)
+                    gs.add_log(f"Alle Schulden getilgt: -{fmt(amt)}", "good")
+                self._close_modal()
+                return None
+
+        elif mt == "savings":
+            self._inputs["amount"].rect = pygame.Rect(bx+30, by+128, 220, 34)
+            bx2 = bx+260; by2 = by+128
+            # Einzahlen
+            if pygame.Rect(bx2, by2, 120, 34).collidepoint(mx,my):
+                amt = self._inputs["amount"].val()
+                if 0 < amt <= gs.cash:
+                    gs.cash    -= amt
+                    gs.savings += amt
+                    gs.add_log(f"Festgeld eingelegt: {fmt(amt)}", "info")
+                self._close_modal()
+                return None
+            # Auszahlen
+            if pygame.Rect(bx+30, by+180, 160, 34).collidepoint(mx,my):
+                if gs.savings > 0:
+                    gs.cash    += gs.savings
+                    gs.add_log(f"Festgeld ausgezahlt: {fmt(gs.savings)}", "info")
+                    gs.savings  = 0
+                self._close_modal()
+                return None
+
+        elif mt == "buy_stock":
+            sid = self.modal["sid"]
+            self._inputs["qty"].rect = pygame.Rect(bx+30, by+130, 180, 34)
+            if pygame.Rect(bx+220, by+130, 110, 34).collidepoint(mx,my):
+                qty = int(self._inputs["qty"].val())
+                cost = qty * gs.stock_data[sid]["price"]
+                if qty > 0 and gs.cash >= cost:
+                    gs.cash -= cost
+                    gs.stocks[sid] = gs.stocks.get(sid, 0.0) + qty
+                    gs.add_log(f"Aktie gekauft: {qty}x {gs.stock_data[sid]['name']}", "good")
+                    self._check_achievements()
+                self._close_modal()
+                return None
+
+        elif mt == "sell_stock":
+            sid = self.modal["sid"]
+            self._inputs["qty"].rect = pygame.Rect(bx+30, by+130, 180, 34)
+            if pygame.Rect(bx+220, by+130, 110, 34).collidepoint(mx,my):
+                qty    = int(self._inputs["qty"].val())
+                owned  = gs.stocks.get(sid, 0.0)
+                qty    = min(qty, int(owned))
+                if qty > 0:
+                    proceeds = qty * gs.stock_data[sid]["price"]
+                    gs.cash  += proceeds
+                    gs.stocks[sid] = owned - qty
+                    gs.add_log(f"Aktie verkauft: {qty}x {gs.stock_data[sid]['name']}", "info")
+                self._close_modal()
+                return None
+            # Alles verkaufen
+            if pygame.Rect(bx+30, by+180, 160, 34).collidepoint(mx,my):
+                owned = gs.stocks.get(sid, 0.0)
+                if owned > 0:
+                    proceeds = owned * gs.stock_data[sid]["price"]
+                    gs.cash += proceeds
+                    gs.stocks[sid] = 0
+                    gs.add_log(f"Alle {gs.stock_data[sid]['name']} verkauft: +{fmt(proceeds)}", "info")
+                self._close_modal()
+                return None
+
+        elif mt == "buy_etf":
+            self._inputs["qty"].rect = pygame.Rect(bx+30, by+130, 180, 34)
+            # Kaufen
+            if pygame.Rect(bx+220, by+130, 110, 34).collidepoint(mx,my):
+                qty  = self._inputs["qty"].val()
+                cost = qty * gs.etf_price
+                if qty > 0 and gs.cash >= cost:
+                    gs.cash -= cost
+                    gs.etf  += qty
+                    gs.add_log(f"ETF gekauft: {qty:.1f} Anteile ({fmt(cost)})", "good")
+                    self._check_achievements()
+                self._close_modal()
+                return None
+            # Alles verkaufen
+            if pygame.Rect(bx+30, by+180, 160, 34).collidepoint(mx,my):
+                if gs.etf > 0:
+                    proceeds = gs.etf * gs.etf_price
+                    gs.cash  += proceeds
+                    gs.add_log(f"Alle ETF-Anteile verkauft: +{fmt(proceeds)}", "info")
+                    gs.etf = 0
+                self._close_modal()
+                return None
+
+        return None
+
+    def _handle_stock_click(self, mx, my):
+        """Klick in Aktien-Tab → öffne Buy/Sell."""
+        gs = self.gs
+        cx, cy2 = 192, 46+32+8
+        pad, col_w = 10, (W-192-pad*3)//2
+        row_h = 62
+        sids = list(gs.stock_data.keys())
+        for i, sid in enumerate(sids):
+            rx = cx+pad + (i%2)*(col_w+pad)
+            ry = cy2 + (i//2)*row_h
+            r  = pygame.Rect(rx, ry, col_w, row_h-4)
+            if r.collidepoint(mx,my):
+                # Links-Hälfte → Kaufen, Rechts-Hälfte → Verkaufen
+                if mx < rx + col_w*0.65:
+                    self._open_buy_stock(sid)
+                else:
+                    self._open_sell_stock(sid)
+                return
+        # ETF-Bereich
+        ey = cy2 + (len(sids)//2 + (1 if len(sids)%2 else 0))*row_h + 10
+        if pygame.Rect(cx+pad, ey, W-192-pad*2, 70).collidepoint(mx,my):
+            self._open_buy_etf()
+
+    # ── Mausrad für Modal-Scroll ──
+    def handle_scroll(self, ev):
+        if ev.type == pygame.MOUSEWHEEL and self.modal:
+            self._scroll = max(0, self._scroll - ev.y * 30)
+
+    # ══ ZEICHNEN ══════════════════════════════════════
     def draw(self):
-        global W, H
-        W, H = screen.get_size()
-        screen.fill(C["bg"])
+        screen.fill(BG)
         self._draw_topbar()
         self._draw_sidebar()
-        self._draw_center()
+        self._draw_tabs()
+        self._draw_content()
         self._draw_newsbar()
         if self.modal:
+            dim_overlay(screen)
             self._draw_modal()
         if self._ach_popup:
             self._draw_ach_popup()
-        pygame.display.flip()
 
+    # ── TOPBAR ──
     def _draw_topbar(self):
         gs = self.gs
-        h = 46
-        draw_rect(screen, C["panel"], (0, 0, W, h))
-        pygame.draw.line(screen, C["border"], (0, h), (W, h))
+        box(screen, PANEL, (0,0,W,44))
+        line(screen, BORDER, (0,44),(W,44))
 
-        x = 10
-        draw_text(screen, "💼 Business Tycoon Pro", "lg", C["gold"], x, h//2, "midleft")
-        x += 220
+        txt(screen,"Business Tycoon Pro","lg",GOLD, 10,22,"midleft")
 
         stats = [
-            ("💰", "Bargeld",   fmt(gs.cash),      gs.cash >= 0),
-            ("📈", "Nettoverm.", fmt(gs.net_worth()), True),
-            (f"{gs.month:02d}.{gs.year}", "", "", True),
-            ("🏦", "Schulden",  fmt(gs.loan),       gs.loan == 0),
-            ("⭐", "Ruf",       str(int(gs.reputation)), gs.reputation >= 50),
+            ("Bargeld", fmt(gs.cash),      gs.cash>=0),
+            ("Nettoverm.", fmt(gs.net_worth()), True),
+            (f"{gs.month:02d}.{gs.year}","",True),
+            ("Schulden", fmt(gs.loan),     gs.loan==0),
+            ("Ruf",      str(int(gs.reputation)), gs.reputation>=50),
         ]
-        for icon, label, val, good in stats:
-            if x + 130 > W - 200: break
-            draw_rect(screen, C["panel2"], (x, 6, 120, 33), 16)
-            draw_text(screen, f"{icon} {label}: ", "tiny", C["muted"], x+8, h//2, "midleft")
-            col = C["green"] if good else C["red"]
-            draw_text(screen, val, "sm", col, x+112, h//2, "midright")
+        x = 220
+        for label,val,good in stats:
+            if not val:  # Datum-Sonderfall
+                txt(screen, label,"sm",CYAN, x+50,22,"center")
+                x += 100; continue
+            box(screen, PANEL2, (x,6,120,32),16)
+            txt(screen,f"{label}:","xs",MUTED, x+8,22,"midleft")
+            txt(screen, val,"sm", GREEN if good else RED, x+112,22,"midright")
             x += 128
 
-        # Speed-Buttons
-        for i, (label, ms) in enumerate([("1×", 2000), ("3×", 800), ("10×", 300)]):
-            bx = W - 190 + i * 44
-            active = self.speed == ms
-            col = C["accent"] if active else C["panel2"]
-            draw_rect(screen, col, (bx, 8, 38, 28), 6)
-            draw_border(screen, C["border"] if not active else C["accent"], (bx, 8, 38, 28), 1, 6)
-            draw_text(screen, label, "sm", C["white"], bx+19, 22, "center")
+        # Speed
+        speeds = [(2000,"1x"),(800,"3x"),(300,"10x")]
+        for i,(ms,lbl) in enumerate(speeds):
+            r = pygame.Rect(W-190+i*44, 9, 38, 26)
+            c = ACCENT if self.speed==ms else PANEL2
+            box(screen,c,r,6)
+            box(screen,BORDER,r,6,1)
+            txt(screen,lbl,"sm",WHITE,r.centerx,r.centery,"center")
 
-        # Pause-Button
-        col = C["green"] if not self.paused else C["yellow"]
-        draw_rect(screen, col, (W - 100, 8, 90, 28), 14)
-        label = "⏸ Pause" if not self.paused else "▶ Weiter"
-        draw_text(screen, label, "sm", C["bg"], W - 55, 22, "center")
+        # Pause
+        pr = pygame.Rect(W-98,9,88,26)
+        pc = GREEN if not self.paused else YELLOW
+        box(screen,pc,pr,13)
+        txt(screen,"Pause" if not self.paused else "Weiter","sm",BG,
+            pr.centerx,pr.centery,"center")
+
+    # ── SIDEBAR ──
+    def _sidebar_rects(self):
+        """Gibt (key, y, h) für jeden Sidebar-Button zurück."""
+        entries = [
+            ("__sec_immo__","Immobilien"),
+            ("buy_prop",   "  Kaufen"),
+            ("sell_prop",  "  Verkaufen"),
+            ("upg_prop",   "  Renovieren"),
+            ("__sec_comp__","Unternehmen"),
+            ("buy_comp",   "  Gruenden"),
+            ("sell_comp",  "  Verkaufen"),
+            ("upg_comp",   "  Erweitern"),
+            ("__sec_fin__", "Finanzen"),
+            ("loan",       "  Kredit aufnehmen"),
+            ("repay",      "  Kredit tilgen"),
+            ("savings",    "  Festgeld"),
+            ("buy_etf",    "  ETF kaufen"),
+        ]
+        y = 52
+        rects = []
+        for key, label in entries:
+            if key.startswith("__"):
+                rects.append((key, y, 18))
+                y += 20
+            else:
+                rects.append((key, y, 28))
+                y += 30
+        return rects
 
     def _draw_sidebar(self):
-        sx, sy, sw, sh = 0, 46, 190, H - 46 - 22
-        draw_rect(screen, C["panel"], (sx, sy, sw, sh))
-        pygame.draw.line(screen, C["border"], (sw, sy), (sw, H - 22))
-        y = sy + 10
-        sections = [
-            ("ÜBERSICHT", [("📊 Dashboard", 0), ("🌍 Wirtschaft", 1)]),
-            ("INVESTIEREN", [("🏠 Immobilien", "prop"), ("🏭 Unternehmen", "comp"),
-                             ("📈 Märkte", 2), ("₿ Krypto", 3)]),
-            ("FINANZEN", [("💳 Kredit", "loan"), ("💸 Tilgen", "repay"),
-                          ("🏦 Festgeld", "savings")]),
-            ("SONSTIGES", [("🏆 Erfolge", 4), ("📜 Log", 5)]),
+        box(screen, PANEL, (0,44,188,H-44-20))
+        line(screen,BORDER,(188,44),(188,H-20))
+        entries = [
+            ("__sec_immo__","Immobilien"),
+            ("buy_prop",   "  Immo kaufen"),
+            ("sell_prop",  "  Immo verkaufen"),
+            ("upg_prop",   "  Renovieren"),
+            ("__sec_comp__","Unternehmen"),
+            ("buy_comp",   "  Firma gruenden"),
+            ("sell_comp",  "  Firma verkaufen"),
+            ("upg_comp",   "  Firm erweitern"),
+            ("__sec_fin__", "Finanzen"),
+            ("loan",       "  Kredit aufnehmen"),
+            ("repay",      "  Kredit tilgen"),
+            ("savings",    "  Festgeld"),
+            ("buy_etf",    "  ETF kaufen"),
         ]
-        for sec_title, items in sections:
-            draw_text(screen, sec_title, "tiny", C["muted"], sx+10, y)
-            y += 16
-            for label, action in items:
-                active = (self.tab == action and isinstance(action, int))
-                col = C["accent"] if active else C["panel2"]
-                draw_rect(screen, col, (sx+5, y, sw-10, 28), 6)
-                badge_txt = ""
-                if action == "prop":
-                    badge_txt = str(len(self.gs.properties))
-                elif action == "comp":
-                    badge_txt = str(len(self.gs.companies))
-                draw_text(screen, label, "sm", C["white"] if active else C["muted"],
-                          sx+12, y+14, "midleft")
-                if badge_txt:
-                    bw = fonts["tiny"].size(badge_txt)[0] + 10
-                    draw_rect(screen, C["accent2"], (sx+sw-16-bw, y+6, bw, 16), 8)
-                    draw_text(screen, badge_txt, "tiny", C["white"], sx+sw-16-bw//2, y+14, "center")
-                y += 32
-            y += 6
+        for key, ry, rh in self._sidebar_rects():
+            label = next(l for k,l in entries if k==key)
+            if key.startswith("__"):
+                txt(screen, label.upper(),"xs",MUTED, 10, ry+2)
+            else:
+                box(screen,PANEL2,(4,ry,182,rh),5)
+                txt(screen, label, "sm", WHITE, 12, ry+rh//2, "midleft")
 
-    def _draw_center(self):
-        cx, cy, cw, ch = 190, 46, W - 190, H - 46 - 22
-        # Tab-Leiste
-        tab_h = 34
-        draw_rect(screen, C["panel"], (cx, cy, cw, tab_h))
-        pygame.draw.line(screen, C["border"], (cx, cy+tab_h), (cx+cw, cy+tab_h))
-        tx = cx + 8
-        for i, name in enumerate(self.TAB_NAMES):
-            tw = fonts["sm"].size(name)[0] + 20
+    # ── TABS ──
+    def _draw_tabs(self):
+        box(screen, PANEL, (188,44,W-188,32))
+        line(screen,BORDER,(188,76),(W,76))
+        tx = 194
+        for i, name in enumerate(TABS):
+            tw = F["sm"].size(name)[0]+22
             active = self.tab == i
             if active:
-                draw_rect(screen, C["accent"], (tx, cy+tab_h-3, tw, 3), 0)
-                draw_text(screen, name, "sm", C["accent"], tx+tw//2, cy+tab_h//2, "center")
+                box(screen,ACCENT,(tx,74,tw,2),0)
+                txt(screen,name,"sm",ACCENT,tx+tw//2,60,"center")
             else:
-                draw_text(screen, name, "sm", C["muted"], tx+tw//2, cy+tab_h//2, "center")
-            tx += tw + 4
+                txt(screen,name,"sm",MUTED,tx+tw//2,60,"center")
+            tx += tw+2
 
-        # Content
-        content_y = cy + tab_h + 1
-        content_h = ch - tab_h - 1
-        {0: self._tab_dashboard,
-         1: self._tab_economy,
-         2: self._tab_markets,
-         3: self._tab_crypto,
-         4: self._tab_achievements,
-         5: self._tab_log,
-        }.get(self.tab, self._tab_dashboard)(cx, content_y, cw, content_h)
+    # ── CONTENT ──
+    def _draw_content(self):
+        x,y,w,h = 188,76,W-188,H-76-20
+        {0:self._tab_dashboard,
+         1:self._tab_economy,
+         2:self._tab_stocks,
+         3:self._tab_achievements,
+         4:self._tab_log,
+        }.get(self.tab, self._tab_dashboard)(x,y,w,h)
 
-    # ── TAB: DASHBOARD ─────────────────────────────────────────
+    # ── TAB: DASHBOARD ──
     def _tab_dashboard(self, x, y, w, h):
         gs = self.gs
-        pad = 12
-        card_w = (w - pad*3) // 3
-        card_h = 100
-
-        # Übersicht-Kacheln
+        pad = 10
+        # 6 Kacheln
+        cw = (w-pad*4)//3; ch2 = 90
         tiles = [
-            ("💰 Bargeld",        fmt(gs.cash),              C["cyan"],    gs.cash >= 0),
-            ("📈 Nettovermögen",  fmt(gs.net_worth()),        C["gold"],    True),
-            ("🏠 Immobilien",     f"{len(gs.properties)} Obj.",C["green"],  True),
-            ("🏭 Unternehmen",    f"{len(gs.companies)} Firmen",C["accent"],True),
-            ("📊 Monat. Einnahmen",fmt(gs.monthly_income()),  C["green"],   True),
-            ("📉 Monat. Ausgaben", fmt(gs.monthly_expenses()),C["red"],     False),
+            ("Bargeld",      fmt(gs.cash),                  gs.cash>=0),
+            ("Nettovermoegen",fmt(gs.net_worth()),            True),
+            ("Immobilien",   f"{len(gs.props)} Objekte",     True),
+            ("Unternehmen",  f"{len(gs.comps)} Firmen",      True),
+            ("Monat. Einnahmen", fmt(gs.monthly_income()),   True),
+            ("Monat. Ausgaben",  fmt(gs.monthly_expenses()), False),
         ]
-        for i, (label, val, col, _) in enumerate(tiles):
-            row, col_i = divmod(i, 3)
-            cx2 = x + pad + col_i*(card_w+pad)
-            cy2 = y + pad + row*(card_h+pad)
-            draw_rect(screen, C["panel2"], (cx2, cy2, card_w, card_h), 8)
-            draw_border(screen, C["border"], (cx2, cy2, card_w, card_h), 1, 8)
-            draw_text(screen, label, "tiny", C["muted"], cx2+10, cy2+12)
-            draw_text(screen, val, "lg", col, cx2+10, cy2+38)
+        for i,(label,val,good) in enumerate(tiles):
+            row, ci = divmod(i,3)
+            tx2 = x+pad + ci*(cw+pad)
+            ty2 = y+pad + row*(ch2+pad)
+            box(screen,PANEL2,(tx2,ty2,cw,ch2),8)
+            box(screen,BORDER,(tx2,ty2,cw,ch2),8,1)
+            txt(screen,label,"xs",MUTED,tx2+10,ty2+12)
+            txt(screen,val,"lg",GREEN if good else RED,tx2+10,ty2+42)
 
-        # Nettovermögen-Chart
-        cy_chart = y + pad + 2*(card_h+pad) + 8
-        ch_chart = h - 2*(card_h+pad) - pad*3 - 30
-        if ch_chart > 60:
-            draw_rect(screen, C["panel2"], (x+pad, cy_chart, w-pad*2, ch_chart), 8)
-            draw_border(screen, C["border"], (x+pad, cy_chart, w-pad*2, ch_chart), 1, 8)
-            draw_text(screen, "📈 Nettovermögen-Verlauf (24 Monate)", "sm", C["muted"],
-                      x+pad+10, cy_chart+8)
-            if len(gs.net_worth_hist) >= 2:
-                draw_sparkline(screen, gs.net_worth_hist,
-                               x+pad+10, cy_chart+28,
-                               w-pad*2-20, ch_chart-42)
-            # Cash-Flow-Balken
-            if len(gs.cash_flow_hist) >= 2:
-                bw = max(2, (w-pad*2-20) // max(1, len(gs.cash_flow_hist)))
-                mn2 = min(gs.cash_flow_hist)
-                mx2 = max(gs.cash_flow_hist)
-                rng = mx2-mn2 if mx2 != mn2 else 1
-                bh_total = (ch_chart-42)//3
-                by0 = cy_chart + ch_chart - 16 - bh_total
-                zero_y = by0 + int((mx2/rng)*bh_total) if mx2 != mn2 else by0+bh_total//2
-                for i, cf in enumerate(gs.cash_flow_hist):
-                    bx2 = x+pad+10 + i*bw
-                    norm = (cf - mn2) / rng
-                    bh = max(1, int(norm*bh_total))
-                    col2 = C["green"] if cf >= 0 else C["red"]
-                    pygame.draw.rect(screen, col2, (bx2, zero_y-bh, bw-1, bh))
-                draw_text(screen, "📊 Monatlicher Cashflow", "tiny", C["muted"], x+pad+10, by0-14)
+        # NW-Chart
+        cy3 = y+pad+2*(ch2+pad)+8
+        ch3 = h - 2*(ch2+pad) - pad*3 - 8
+        if ch3 > 60 and len(gs.nw_hist) >= 2:
+            box(screen,PANEL2,(x+pad,cy3,w-pad*2,ch3),8)
+            box(screen,BORDER,(x+pad,cy3,w-pad*2,ch3),8,1)
+            txt(screen,"Nettovermoegen (24 Monate)","xs",MUTED,x+pad+10,cy3+8)
+            sparkline(screen,gs.nw_hist, x+pad+10,cy3+24, w-pad*2-20,ch3-36, CYAN)
 
-    # ── TAB: WIRTSCHAFT ────────────────────────────────────────
+            if len(gs.cf_hist) >= 2:
+                bary = cy3+ch3-ch3//3-8
+                barh = ch3//3
+                bw2  = max(2,(w-pad*2-20)//max(1,len(gs.cf_hist)))
+                mn2,mx2 = min(gs.cf_hist),max(gs.cf_hist)
+                rng = mx2-mn2 if mx2!=mn2 else 1
+                zero = bary + int(max(0,mx2)/rng * barh)
+                for ii, cf in enumerate(gs.cf_hist):
+                    bx2 = x+pad+10+ii*bw2
+                    norm = (cf-mn2)/rng
+                    bh2  = max(1,int(norm*barh))
+                    c    = GREEN if cf>=0 else RED
+                    screen.fill(c,pygame.Rect(bx2, zero-int((cf/rng)*barh), bw2-1, max(1,abs(int((cf/rng)*barh)))))
+                txt(screen,"Monatlicher Cashflow","xs",MUTED,x+pad+10,bary-12)
+
+    # ── TAB: WIRTSCHAFT ──
     def _tab_economy(self, x, y, w, h):
         gs = self.gs
+        ph = PHASES[gs.phase]
         pad = 12
-        phase = PHASES[gs.econ_phase]
 
-        # Phaseanzeige
-        ph_w, ph_h = w-pad*2, 70
-        draw_rect(screen, C["panel2"], (x+pad, y+pad, ph_w, ph_h), 8)
-        draw_rect(screen, phase["color"], (x+pad, y+pad, 5, ph_h), 2)
-        draw_text(screen, "Aktuelle Wirtschaftsphase", "tiny", C["muted"], x+pad+14, y+pad+10)
-        draw_text(screen, phase["label"], "xl", phase["color"], x+pad+14, y+pad+34)
-        draw_text(screen, f"Noch ca. {gs.econ_duration} Monate", "tiny", C["muted"],
-                  x+pad+14, y+pad+58)
+        # Phase-Banner
+        box(screen,PANEL2,(x+pad,y+pad,w-pad*2,72),8)
+        pygame.draw.rect(screen,ph["col"],(x+pad,y+pad,5,72),border_radius=2)
+        txt(screen,"Aktuelle Wirtschaftsphase","xs",MUTED,x+pad+14,y+pad+10)
+        txt(screen,ph["label"],"xl",ph["col"],x+pad+14,y+pad+36)
+        txt(screen,f"Noch ca. {gs.phase_dur} Monate","xs",MUTED,x+pad+14,y+pad+60)
 
         # Indikatoren
-        iy = y+pad+ph_h+pad
+        iy = y+pad+80
         indics = [
-            ("🏦 Leitzins",         f"{gs.interest_rate:.2f}%",    gs.interest_rate < 5),
-            ("📊 BIP-Wachstum",      f"{gs.gdp_growth:.1f}%",       gs.gdp_growth > 0),
-            ("👷 Arbeitslosigkeit",  f"{gs.unemployment:.1f}%",     gs.unemployment < 8),
-            ("🌡 Markt-Stimmung",    f"{int(gs.market_sent)}/100",  gs.market_sent > 50),
-            ("💹 Inflation",         f"{gs.inflation*12*100:.1f}% p.a.", gs.inflation*12 < 0.03),
-            ("💳 Kreditrate",        f"{(gs.loan_rate*12*100):.2f}% p.a.", True),
+            ("Leitzins",      f"{gs.base_rate:.2f}%",          gs.base_rate<6),
+            ("BIP-Wachstum",  f"{gs.gdp:.1f}%",                gs.gdp>0),
+            ("Arbeitslosigkeit",f"{gs.unemp:.1f}%",            gs.unemp<8),
+            ("Marktstimmung", f"{int(gs.sentiment)}/100",      gs.sentiment>50),
+            ("Inflation",     f"{gs.inflation*12*100:.1f}% pa", gs.inflation*12<0.03),
+            ("Kreditrate",    f"{gs.loan_rate*12*100:.2f}% pa", True),
         ]
-        iw = (w-pad*3)//3
-        ih = 60
-        for i, (label, val, good) in enumerate(indics):
-            row, ci = divmod(i, 3)
-            ix = x+pad + ci*(iw+pad)
-            iy2 = iy + row*(ih+8)
-            draw_rect(screen, C["panel2"], (ix, iy2, iw, ih), 6)
-            draw_border(screen, C["border"], (ix, iy2, iw, ih), 1, 6)
-            draw_text(screen, label, "tiny", C["muted"], ix+8, iy2+10)
-            col = C["green"] if good else C["red"]
-            draw_text(screen, val, "md", col, ix+8, iy2+32)
+        iw2 = (w-pad*4)//3; ih2 = 58
+        for i,(label,val,good) in enumerate(indics):
+            row, ci = divmod(i,3)
+            ix2 = x+pad + ci*(iw2+pad)
+            iy2 = iy + row*(ih2+8)
+            box(screen,PANEL2,(ix2,iy2,iw2,ih2),6)
+            box(screen,BORDER,(ix2,iy2,iw2,ih2),6,1)
+            txt(screen,label,"xs",MUTED,ix2+8,iy2+10)
+            txt(screen,val,"md",GREEN if good else RED,ix2+8,iy2+32)
 
-        # Phasen-Übersicht
-        py2 = iy + 2*(ih+8) + 16
-        draw_text(screen, "Wirtschaftsphasen", "sm", C["muted"], x+pad, py2)
-        py2 += 22
-        pw = (w-pad*2-40)//6
-        for i, (pname, pd) in enumerate(PHASES.items()):
-            px2 = x+pad + i*(pw+8)
-            active = gs.econ_phase == pname
-            col2 = pd["color"] if active else C["panel2"]
-            draw_rect(screen, col2 if active else C["panel2"], (px2, py2, pw, 44), 6)
-            draw_border(screen, pd["color"] if active else C["border"], (px2, py2, pw, 44), 2 if active else 1, 6)
-            draw_text(screen, pd["label"][:6], "tiny",
-                      pd["color"] if not active else C["bg"],
-                      px2+pw//2, py2+22, "center")
+        # Phasen-Leiste
+        py2 = iy + 2*(ih2+8) + 16
+        txt(screen,"Alle Wirtschaftsphasen","xs",MUTED,x+pad,py2-14)
+        pw2 = (w-pad*2-40)//6
+        for i,(pname,pd) in enumerate(PHASES.items()):
+            px2 = x+pad + i*(pw2+8)
+            active = gs.phase == pname
+            bg = pd["col"] if active else PANEL2
+            box(screen,bg,(px2,py2,pw2,40),6)
+            box(screen,pd["col"],(px2,py2,pw2,40),6,2 if active else 1)
+            c = BG if active else pd["col"]
+            txt(screen,pd["label"][:8],"xs",c,px2+pw2//2,py2+20,"center")
 
-        # Tipps
-        ty = py2+56
-        tips_map = {
-            "BOOM":          "💡 Jetzt Aktien kaufen! Firmengewinne steigen. Immobilienwert steigt.",
-            "STABLE":        "💡 Stabile Phase – ideal um Schulden zu tilgen und Reserven aufzubauen.",
-            "RECESSION":     "💡 Vorsicht bei Neukäufen. ETFs sind defensiver als Einzelaktien.",
-            "DEPRESSION":    "💡 Bargeld ist König. Reduziere Risiken, halte durch!",
-            "STAGFLATION":   "💡 Sachwerte (Immobilien, Rohstoffe) schützen vor Inflation.",
-            "HYPERINFLATION":"💡 Immobilien & Krypto können Schutz bieten. Cash verliert Wert!",
+        # Tipp
+        tips = {
+            "BOOM":          "Aktien kaufen! Firmengewinne steigen. Immowert steigt.",
+            "STABLE":        "Stabile Phase – ideal fuer Schuldenabbau und Sparen.",
+            "RECESSION":     "Vorsicht! ETFs sicherer als Einzelaktien.",
+            "DEPRESSION":    "Bargeld halten. Kein unnötiges Risiko eingehen!",
+            "STAGFLATION":   "Sachwerte (Immobilien) schuetzen vor Inflation.",
+            "HYPERINFLATION":"Immobilien kaufen! Bargeld verliert rasant an Wert.",
         }
-        tip = tips_map.get(gs.econ_phase, "")
-        if tip and ty + 40 < y+h:
-            draw_rect(screen, C["panel2"], (x+pad, ty, w-pad*2, 40), 6)
-            draw_border(screen, C["yellow"], (x+pad, ty, w-pad*2, 40), 1, 6)
-            draw_text(screen, tip, "sm", C["yellow"], x+pad+10, ty+20, "midleft", w-pad*2-20)
+        ty2 = py2+52
+        if ty2+36 < y+h:
+            tip = tips.get(gs.phase,"")
+            box(screen,PANEL2,(x+pad,ty2,w-pad*2,34),6)
+            box(screen,YELLOW,(x+pad,ty2,w-pad*2,34),6,1)
+            txt(screen,f"Tipp: {tip}","sm",YELLOW,x+pad+10,ty2+17,"midleft",w-pad*2-20)
 
-    # ── TAB: MÄRKTE ────────────────────────────────────────────
-    def _tab_markets(self, x, y, w, h):
+    # ── TAB: AKTIEN ──
+    def _tab_stocks(self, x, y, w, h):
         gs = self.gs
-        pad = 10
-        col_w = (w-pad*3)//2
-
-        # Aktien
-        draw_text(screen, "📈 Aktienmarkt", "md", C["gold"], x+pad, y+pad)
-        sy = y+pad+22
-        row_h = 52
-        for i, s in enumerate(gs.stocks):
-            sx2 = x+pad + (i%2)*(col_w+pad)
-            sy2 = sy + (i//2)*row_h
-            if sy2 + row_h > y+h: break
-            qty = gs.stock_qty.get(s.sid, 0)
-            draw_rect(screen, C["panel2"], (sx2, sy2, col_w, row_h-4), 6)
-            draw_border(screen, C["border"], (sx2, sy2, col_w, row_h-4), 1, 6)
-            # Sparkline
-            if len(s.hist) >= 2:
-                draw_sparkline(screen, s.hist, sx2+col_w-65, sy2+6, 58, 38,
-                               C["green"] if s.hist[-1] >= s.hist[0] else C["red"])
-            pchg = (s.hist[-1]/s.hist[-2]-1)*100 if len(s.hist)>=2 else 0
-            pchg_col = C["green"] if pchg >= 0 else C["red"]
-            draw_text(screen, f"{s.icon} {s.name}", "sm", C["white"], sx2+6, sy2+8)
-            draw_text(screen, fmt(s.price).replace(" €","€"), "sm", C["cyan"], sx2+6, sy2+26)
-            draw_text(screen, f"{pchg:+.1f}%", "tiny", pchg_col, sx2+6, sy2+40)
-            draw_text(screen, f"Div: {s.div*100:.1f}%", "tiny", C["muted"], sx2+85, sy2+8)
+        pad = 10; col_w = (w-pad*3)//2; row_h = 62
+        txt(screen,"Klick links: Kaufen  |  Klick rechts: Verkaufen","xs",MUTED,x+pad,y+4)
+        sids = list(gs.stock_data.keys())
+        for i, sid in enumerate(sids):
+            s   = gs.stock_data[sid]
+            rx  = x+pad + (i%2)*(col_w+pad)
+            ry  = y+18 + (i//2)*row_h
+            qty = gs.stocks.get(sid,0)
+            box(screen,PANEL2,(rx,ry,col_w,row_h-4),6)
+            box(screen,BORDER,(rx,ry,col_w,row_h-4),6,1)
+            pchg = (s["hist"][-1]/s["hist"][-2]-1)*100 if len(s["hist"])>=2 else 0
+            txt(screen,s["name"],"sm",WHITE,rx+8,ry+10)
+            txt(screen,fmt(s["price"]),"sm",CYAN,rx+8,ry+30)
+            txt(screen,f"{pchg:+.1f}%","xs",GREEN if pchg>=0 else RED,rx+8,ry+48)
+            txt(screen,f"Div: {s['div']*100:.1f}%","xs",MUTED,rx+col_w//2,ry+10)
             if qty > 0:
-                draw_text(screen, f"{qty:.0f} Stk.", "tiny", C["accent"], sx2+85, sy2+26)
-                draw_text(screen, fmt(qty*s.price).replace(" €","€"), "tiny", C["accent2"],
-                          sx2+85, sy2+40)
+                txt(screen,f"{qty:.0f} Stk = {fmt(qty*s['price'])}","xs",PURPLE,rx+col_w//2,ry+30)
+            if len(s["hist"]) >= 2:
+                sparkline(screen,s["hist"],rx+col_w-80,ry+4,72,50)
 
         # ETF
-        ey = sy + 4*row_h + 8
-        if ey + 70 < y+h:
-            draw_rect(screen, C["panel2"], (x+pad, ey, w-pad*2, 68), 6)
-            draw_border(screen, C["accent"], (x+pad, ey, w-pad*2, 68), 1, 6)
-            draw_text(screen, "🌍 Welt-ETF", "md", C["gold"], x+pad+10, ey+10)
-            draw_text(screen, fmt(gs.etf_price), "lg", C["cyan"], x+pad+10, ey+32)
-            draw_text(screen, "Div: 2.4% p.a. | Diversifiziert, geringes Risiko", "tiny", C["muted"],
-                      x+pad+10, ey+52)
-            if gs.etf_shares > 0:
-                draw_text(screen, f"{gs.etf_shares:.1f} Anteile = {fmt(gs.etf_shares*gs.etf_price)}",
-                          "sm", C["accent"], x+pad+220, ey+32)
+        n_rows = (len(sids)//2) + (1 if len(sids)%2 else 0)
+        ey = y+18 + n_rows*row_h + 8
+        if ey+70 < y+h:
+            ev = gs.etf * gs.etf_price
+            box(screen,PANEL2,(x+pad,ey,w-pad*2,68),8)
+            box(screen,ACCENT,(x+pad,ey,w-pad*2,68),8,1)
+            txt(screen,"Welt-ETF","lg",GOLD,x+pad+10,ey+12)
+            txt(screen,fmt(gs.etf_price),"md",CYAN,x+pad+10,ey+36)
+            txt(screen,"Div: 2.4% pa | Geringes Risiko","xs",MUTED,x+pad+10,ey+56)
+            if gs.etf > 0:
+                txt(screen,f"{gs.etf:.1f} Anteile = {fmt(ev)}","sm",PURPLE,x+pad+240,ey+32)
             if len(gs.etf_hist) >= 2:
-                draw_sparkline(screen, gs.etf_hist, x+w-pad-120, ey+6, 110, 56)
+                sparkline(screen,gs.etf_hist,x+w-pad-120,ey+4,112,60)
 
-    # ── TAB: KRYPTO ────────────────────────────────────────────
-    def _tab_crypto(self, x, y, w, h):
-        gs = self.gs
-        pad = 12
-        draw_text(screen, "₿ Krypto-Markt  (Hochrisikoanlage!)", "md", C["gold"], x+pad, y+pad)
-        draw_text(screen, "Extreme Volatilität – nur spekulieren, nicht investieren, was du nicht verlieren kannst.",
-                  "tiny", C["red"], x+pad, y+pad+20)
-        row_h = 90
-        for i, c in enumerate(gs.cryptos):
-            cy2 = y+pad+40 + i*row_h
-            if cy2+row_h > y+h: break
-            qty = gs.crypto_qty.get(c.cid, 0)
-            draw_rect(screen, C["panel2"], (x+pad, cy2, w-pad*2, row_h-8), 8)
-            draw_border(screen, C["border"], (x+pad, cy2, w-pad*2, row_h-8), 1, 8)
-            if len(c.hist) >= 2:
-                draw_sparkline(screen, c.hist, x+w-pad-130, cy2+8, 120, 70,
-                               C["green"] if c.hist[-1]>=c.hist[0] else C["red"])
-            pchg = (c.hist[-1]/c.hist[-2]-1)*100 if len(c.hist)>=2 else 0
-            pchg_col = C["green"] if pchg >= 0 else C["red"]
-            draw_text(screen, f"{c.icon} {c.name}", "lg", C["white"], x+pad+10, cy2+12)
-            price_str = f"{c.price:,.2f} €" if c.price >= 1 else f"{c.price:.5f} €"
-            draw_text(screen, price_str, "md", C["cyan"], x+pad+10, cy2+38)
-            draw_text(screen, f"{pchg:+.1f}%", "sm", pchg_col, x+pad+10, cy2+58)
-            draw_text(screen, f"Volatilität: {c.vol*100:.0f}%", "tiny", C["muted"], x+pad+160, cy2+38)
-            if qty > 0:
-                val = qty * c.price
-                draw_text(screen, f"Bestand: {qty:.4f} = {fmt(val)}", "sm", C["accent"],
-                          x+pad+160, cy2+58)
-
-    # ── TAB: ERFOLGE ────────────────────────────────────────────
+    # ── TAB: ERFOLGE ──
     def _tab_achievements(self, x, y, w, h):
-        pad = 12
-        draw_text(screen, f"🏆 Erfolge ({len(self.gs.achievements_earned)}/{len(ACHIEVEMENTS)})",
-                  "lg", C["gold"], x+pad, y+pad)
-        row_h = 56
-        for i, (aid, title, desc, _) in enumerate(ACHIEVEMENTS):
-            ay = y+pad+32 + i*row_h
+        gs = self.gs
+        n = len(gs.achiev_done)
+        txt(screen,f"Erfolge {n}/{len(ACHIEVEMENTS)}","lg",GOLD,x+12,y+10)
+        row_h = 52
+        for i,(aid,title,desc,_) in enumerate(ACHIEVEMENTS):
+            ay = y+40 + i*row_h
             if ay+row_h > y+h: break
-            earned = aid in self.gs.achievements_earned
-            col = C["panel2"] if not earned else C["panel"]
-            draw_rect(screen, col, (x+pad, ay, w-pad*2, row_h-6), 7)
-            border_col = C["gold"] if earned else C["border"]
-            draw_border(screen, border_col, (x+pad, ay, w-pad*2, row_h-6), 1, 7)
-            icon = "✅" if earned else "🔒"
-            draw_text(screen, icon, "lg", C["gold"] if earned else C["muted"], x+pad+12, ay+24, "midleft")
-            draw_text(screen, title, "md" if earned else "sm",
-                      C["white"] if earned else C["muted"], x+pad+44, ay+14)
-            draw_text(screen, desc, "tiny", C["muted"], x+pad+44, ay+34)
+            earned = aid in gs.achiev_done
+            bg = PANEL2 if not earned else (31,50,35)
+            box(screen,bg,(x+10,ay,w-20,row_h-4),7)
+            bc = GREEN if earned else BORDER
+            box(screen,bc,(x+10,ay,w-20,row_h-4),7,1)
+            icon = "OK" if earned else "--"
+            txt(screen,icon,"sm",GREEN if earned else MUTED,x+24,ay+24,"midleft")
+            txt(screen,title,"md" if earned else "sm",
+                WHITE if earned else MUTED,x+60,ay+14)
+            txt(screen,desc,"xs",MUTED,x+60,ay+34)
 
-    # ── TAB: LOG ─────────────────────────────────────────────
+    # ── TAB: LOG ──
     def _tab_log(self, x, y, w, h):
         gs = self.gs
-        pad = 10
-        draw_text(screen, "📜 Aktivitätslog", "md", C["gold"], x+pad, y+pad)
-        row_h = 26
-        for i, (text, kind) in enumerate(gs.log[:((h-40)//row_h)]):
-            ly = y+pad+28 + i*row_h
-            col_map = {"good": C["green"], "bad": C["red"],
-                       "warn": C["yellow"], "info": C["cyan"]}
-            col = col_map.get(kind, C["muted"])
-            pygame.draw.rect(screen, col, (x+pad, ly+4, 3, 18))
-            draw_text(screen, text, "sm", C["white"], x+pad+10, ly+13, "midleft",
-                      w-pad*2-10)
+        txt(screen,"Aktivitaetslog","lg",GOLD,x+12,y+10)
+        row_h = 24
+        kind_col = {"good":GREEN,"bad":RED,"warn":YELLOW,"info":CYAN}
+        for i,(msg,kind) in enumerate(gs.log[:(h-40)//row_h]):
+            ly = y+38 + i*row_h
+            col = kind_col.get(kind,MUTED)
+            pygame.draw.rect(screen,col,(x+10,ly+4,3,16))
+            txt(screen,msg,"sm",WHITE,x+18,ly+12,"midleft",w-30)
 
-    # ── NEWSBAR ────────────────────────────────────────────────
+    # ── NEWSBAR ──
     def _draw_newsbar(self):
-        nb_h = 22
-        draw_rect(screen, C["panel"], (0, H-nb_h, W, nb_h))
-        pygame.draw.line(screen, C["border"], (0, H-nb_h), (W, H-nb_h))
-        self._news_x -= 1.5
+        box(screen,PANEL,(0,H-20,W,20))
+        line(screen,BORDER,(0,H-20),(W,H-20))
         gs = self.gs
-        news_str = "  ·  ".join(gs.news[-5:]) if gs.news else "Kein Neuigkeiten."
-        tw = fonts["sm"].size(news_str)[0]
-        if self._news_x < -tw:
-            self._news_x = W
-        draw_text(screen, news_str, "sm", C["muted"], int(self._news_x), H-nb_h+11, "midleft")
+        news_str = "  //  ".join(gs.news[:5]) if gs.news else "Willkommen!"
+        self._news_x -= 1.2
+        if self._news_x < -F["sm"].size(news_str)[0]:
+            self._news_x = float(W)
+        txt(screen,news_str,"sm",MUTED,int(self._news_x),H-10,"midleft")
 
-    # ── MODAL ZEICHNEN ─────────────────────────────────────────
+    # ── MODAL ZEICHNEN ──
     def _draw_modal(self):
-        m = self.modal
-        # Dimm-Overlay
-        s = pygame.Surface((W, H), pygame.SRCALPHA)
-        s.fill((0,0,0,170))
-        screen.blit(s, (0,0))
+        mt = self.modal.get("type","")
+        mw, mh = 660, 520
+        bx = (W-mw)//2
+        by = (H-mh)//2
 
-        mw, mh = min(700, W-40), min(560, H-60)
-        mx, my = (W-mw)//2, (H-mh)//2
-        draw_rect(screen, C["panel"], (mx, my, mw, mh), 12)
-        draw_border(screen, C["accent"], (mx, my, mw, mh), 1, 12)
+        box(screen,PANEL,(bx,by,mw,mh),12)
+        box(screen,ACCENT,(bx,by,mw,mh),12,1)
 
-        mt = m.get("type","")
-        if   mt == "prop":    self._modal_prop(mx, my, mw, mh)
-        elif mt == "comp":    self._modal_comp(mx, my, mw, mh)
-        elif mt == "loan":    self._modal_loan(mx, my, mw, mh)
-        elif mt == "repay":   self._modal_repay(mx, my, mw, mh)
-        elif mt == "savings": self._modal_savings(mx, my, mw, mh)
-        elif mt == "sell_prop": self._modal_sell_prop(mx, my, mw, mh)
-        elif mt == "sell_comp": self._modal_sell_comp(mx, my, mw, mh)
-        elif mt == "upg_prop":  self._modal_upg_prop(mx, my, mw, mh)
-        elif mt == "upg_comp":  self._modal_upg_comp(mx, my, mw, mh)
-        elif mt == "buy_stock":  self._modal_buy_stock(mx, my, mw, mh)
-        elif mt == "sell_stock": self._modal_sell_stock(mx, my, mw, mh)
-        elif mt == "buy_etf":    self._modal_buy_etf(mx, my, mw, mh)
-        elif mt == "buy_crypto": self._modal_buy_crypto(mx, my, mw, mh)
-        elif mt == "sell_crypto":self._modal_sell_crypto(mx, my, mw, mh)
-        elif mt == "gameover":   self._modal_gameover(mx, my, mw, mh)
+        # Schließen
+        box(screen,RED,(bx+mw-32,by+6,24,24),12)
+        txt(screen,"X","sm",WHITE,bx+mw-20,by+18,"center")
 
-        # Schließen-Button
-        close_r = pygame.Rect(mx+mw-34, my+6, 26, 26)
-        draw_rect(screen, C["red"], close_r, 13)
-        draw_text(screen, "✕", "sm", C["white"], close_r.centerx, close_r.centery, "center")
-        if pygame.mouse.get_pressed()[0]:
-            mp = pygame.mouse.get_pos()
-            if close_r.collidepoint(mp):
-                self.modal = None
-                self.paused = False
+        if mt == "buy_prop":    self._draw_m_buy_prop(bx,by,mw,mh)
+        elif mt == "sell_prop": self._draw_m_list_prop(bx,by,mw,mh,"Verkaufen","Verkaufen",RED)
+        elif mt == "upg_prop":  self._draw_m_upg_prop(bx,by,mw,mh)
+        elif mt == "buy_comp":  self._draw_m_buy_comp(bx,by,mw,mh)
+        elif mt == "sell_comp": self._draw_m_list_comp(bx,by,mw,mh,"Verkaufen","Verkaufen",RED)
+        elif mt == "upg_comp":  self._draw_m_upg_comp(bx,by,mw,mh)
+        elif mt == "loan":      self._draw_m_loan(bx,by,mw,mh)
+        elif mt == "repay":     self._draw_m_repay(bx,by,mw,mh)
+        elif mt == "savings":   self._draw_m_savings(bx,by,mw,mh)
+        elif mt in ("buy_stock","sell_stock"): self._draw_m_stock(bx,by,mw,mh)
+        elif mt == "buy_etf":   self._draw_m_etf(bx,by,mw,mh)
 
-    def _modal_prop(self, mx, my, mw, mh):
+    def _draw_m_buy_prop(self, bx, by, mw, mh):
         gs = self.gs
-        draw_text(screen, "🏠 Immobilie kaufen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Bargeld: {fmt(gs.cash)}", "sm", C["cyan"], mx+16, my+42)
-        pad = 16
-        row_h = 68
-        for i, (tid, name, icon, price, rent, maint, lvl) in enumerate(PROP_CATALOG):
-            py = my+66 + i*row_h
-            if py+row_h > my+mh-20: break
+        txt(screen,"Immobilie kaufen","lg",GOLD,bx+16,by+16)
+        txt(screen,f"Bargeld: {fmt(gs.cash)}","sm",CYAN,bx+16,by+42)
+        row_h = 72; y0 = by+60
+        # Scissor-Clipping via subsurface
+        view = screen.subsurface(pygame.Rect(bx, by+55, mw, mh-65))
+        for i, row in enumerate(PROP_CATALOG):
+            tid,name,icon,price,rent,maint,lvl_max = row
+            ry = i*row_h - self._scroll
+            if ry+row_h < 0 or ry > mh-65: continue
             can = gs.cash >= price
-            col = C["panel2"] if can else C["panel"]
-            draw_rect(screen, col, (mx+pad, py, mw-pad*2, row_h-6), 7)
-            draw_border(screen, C["green"] if can else C["border"],
-                        (mx+pad, py, mw-pad*2, row_h-6), 1, 7)
-            draw_text(screen, f"{icon} {name}", "md", C["white"] if can else C["muted"],
-                      mx+pad+10, py+12)
-            draw_text(screen, f"Preis: {fmt(price)}", "tiny", C["muted"], mx+pad+10, py+34)
-            draw_text(screen, f"Miete: +{fmt(rent)}/Monat", "tiny", C["green"], mx+pad+200, py+34)
-            draw_text(screen, f"Kosten: -{fmt(maint)}/Monat", "tiny", C["red"], mx+pad+360, py+34)
-            draw_text(screen, f"Netto: {fmt(rent-maint)}/Monat", "tiny",
-                      C["cyan"], mx+pad+10, py+50)
-            # Kaufen-Button
-            bw = 80
-            bx = mx+mw-pad-bw-10
-            col2 = C["accent"] if can else C["border"]
-            draw_rect(screen, col2, (bx, py+18, bw, 30), 6)
-            draw_text(screen, "Kaufen" if can else "Kein $", "sm",
-                      C["white"], bx+bw//2, py+33, "center")
+            box(view, PANEL2 if can else (25,28,38),(8,ry,mw-16,row_h-4),7)
+            box(view, GREEN if can else BORDER,(8,ry,mw-16,row_h-4),7,1)
+            txt(view,f"{icon}  {name}","md",WHITE if can else MUTED,18,ry+10)
+            txt(view,f"Preis: {fmt(price)}","xs",MUTED,18,ry+32)
+            txt(view,f"Miete: +{fmt(rent)}/Monat","xs",GREEN,220,ry+32)
+            txt(view,f"Kosten: -{fmt(maint)}/Monat","xs",RED,400,ry+32)
+            txt(view,f"Netto: {fmt(rent-maint)}/Monat","xs",CYAN,18,ry+50)
+            col2 = ACCENT if can else BORDER
+            box(view,col2,(mw-112,ry+20,90,30),6)
+            txt(view,"Kaufen" if can else "Kein Geld","sm",WHITE,mw-67,ry+35,"center")
 
-    def _modal_comp(self, mx, my, mw, mh):
+    def _draw_m_list_prop(self, bx, by, mw, mh, title, btn_label, btn_color):
         gs = self.gs
-        draw_text(screen, "🏭 Unternehmen gründen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Bargeld: {fmt(gs.cash)}", "sm", C["cyan"], mx+16, my+42)
-        pad = 16
-        row_h = 68
-        for i, (tid, name, icon, price, profit, maint, risk, lvl) in enumerate(COMP_CATALOG):
-            py = my+66 + i*row_h
-            if py+row_h > my+mh-20: break
+        txt(screen,f"Immobilie {title}","lg",GOLD,bx+16,by+16)
+        if not gs.props:
+            txt(screen,"Keine Immobilien vorhanden.","md",MUTED,bx+16,by+60)
+            return
+        row_h = 64; y0 = by+56
+        view = screen.subsurface(pygame.Rect(bx, by+50, mw, mh-60))
+        for i,p in enumerate(gs.props):
+            ry = i*row_h - self._scroll
+            if ry+row_h<0 or ry>mh-60: continue
+            sv = p["price"]*0.94
+            box(view,PANEL2,(8,ry,mw-16,row_h-4),7)
+            box(view,BORDER,(8,ry,mw-16,row_h-4),7,1)
+            txt(view,f"{p['name']}  (Lvl {p['level']})","md",WHITE,18,ry+10)
+            txt(view,f"Verkaufswert: {fmt(sv)}  |  Netto: {fmt(p['rent']-p['maint'])}/Monat","xs",MUTED,18,ry+34)
+            txt(view,f"{'(Leerstand!)' if p.get('vacant') else ''}","xs",RED,18,ry+50)
+            box(view,btn_color,(mw-112,ry+16,90,30),6)
+            txt(view,btn_label,"sm",WHITE,mw-67,ry+31,"center")
+
+    def _draw_m_upg_prop(self, bx, by, mw, mh):
+        gs = self.gs
+        txt(screen,"Immobilie renovieren","lg",GOLD,bx+16,by+16)
+        txt(screen,"Kosten: 12% des Immowerts  |  +15% Miete, +8% Wert","xs",MUTED,bx+16,by+42)
+        if not gs.props:
+            txt(screen,"Keine Immobilien vorhanden.","md",MUTED,bx+16,by+70)
+            return
+        row_h = 72; y0 = by+56
+        view = screen.subsurface(pygame.Rect(bx, by+50, mw, mh-60))
+        for i,p in enumerate(gs.props):
+            ry  = i*row_h - self._scroll
+            if ry+row_h<0 or ry>mh-60: continue
+            cost   = p["price"]*0.12
+            maxed  = p["level"] >= p["lvl_max"]
+            can    = gs.cash >= cost and not maxed
+            box(view,PANEL2,(8,ry,mw-16,row_h-4),7)
+            box(view,BORDER,(8,ry,mw-16,row_h-4),7,1)
+            txt(view,f"{p['name']}","md",WHITE,18,ry+10)
+            txt(view,f"Level {p['level']}/{p['lvl_max']}  |  Kosten: {fmt(cost)}","xs",MUTED,18,ry+32)
+            progress_bar(view, 18, ry+52, 200, 6, p["level"]/p["lvl_max"], ACCENT)
+            if maxed:
+                box(view,BORDER,(mw-112,ry+22,90,28),6)
+                txt(view,"Max Level","xs",MUTED,mw-67,ry+36,"center")
+            else:
+                box(view,ACCENT if can else BORDER,(mw-112,ry+22,90,28),6)
+                txt(view,"Renovieren" if can else "Kein Geld","xs",WHITE,mw-67,ry+36,"center")
+
+    def _draw_m_buy_comp(self, bx, by, mw, mh):
+        gs = self.gs
+        txt(screen,"Unternehmen gruenden","lg",GOLD,bx+16,by+16)
+        txt(screen,f"Bargeld: {fmt(gs.cash)}","sm",CYAN,bx+16,by+42)
+        row_h = 72; y0 = by+60
+        view = screen.subsurface(pygame.Rect(bx, by+55, mw, mh-65))
+        for i, row in enumerate(COMP_CATALOG):
+            tid,name,icon,price,profit,maint,risk,lvl_max = row
+            ry = i*row_h - self._scroll
+            if ry+row_h<0 or ry>mh-65: continue
             can = gs.cash >= price
-            draw_rect(screen, C["panel2"] if can else C["panel"],
-                      (mx+pad, py, mw-pad*2, row_h-6), 7)
-            draw_border(screen, C["green"] if can else C["border"],
-                        (mx+pad, py, mw-pad*2, row_h-6), 1, 7)
-            draw_text(screen, f"{icon} {name}", "md", C["white"] if can else C["muted"],
-                      mx+pad+10, py+12)
-            draw_text(screen, f"Preis: {fmt(price)}", "tiny", C["muted"], mx+pad+10, py+34)
-            draw_text(screen, f"Gewinn: +{fmt(profit)}/Monat", "tiny", C["green"], mx+pad+200, py+34)
-            draw_text(screen, f"Risiko: {risk*100:.0f}%", "tiny", C["yellow"], mx+pad+360, py+34)
-            draw_text(screen, f"Kosten: -{fmt(maint)}/Monat", "tiny", C["red"], mx+pad+10, py+50)
-            bw = 80
-            bx = mx+mw-pad-bw-10
-            draw_rect(screen, C["accent"] if can else C["border"], (bx, py+18, bw, 30), 6)
-            draw_text(screen, "Gründen" if can else "Kein $", "sm", C["white"], bx+bw//2, py+33, "center")
+            box(view,PANEL2 if can else (25,28,38),(8,ry,mw-16,row_h-4),7)
+            box(view,GREEN if can else BORDER,(8,ry,mw-16,row_h-4),7,1)
+            txt(view,f"{name}","md",WHITE if can else MUTED,18,ry+10)
+            txt(view,f"Preis: {fmt(price)}","xs",MUTED,18,ry+32)
+            txt(view,f"Gewinn: +{fmt(profit)}/Monat","xs",GREEN,220,ry+32)
+            txt(view,f"Risiko: {risk*100:.0f}%","xs",YELLOW,400,ry+32)
+            txt(view,f"Kosten: -{fmt(maint)}/Monat","xs",RED,18,ry+50)
+            col2 = ACCENT if can else BORDER
+            box(view,col2,(mw-112,ry+20,90,30),6)
+            txt(view,"Gruenden" if can else "Kein Geld","sm",WHITE,mw-67,ry+35,"center")
 
-    def _modal_loan(self, mx, my, mw, mh):
+    def _draw_m_list_comp(self, bx, by, mw, mh, title, btn_label, btn_color):
         gs = self.gs
-        draw_text(screen, "💳 Kredit aufnehmen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Aktueller Schuldenstand: {fmt(gs.loan)}", "sm", C["red"], mx+16, my+46)
-        rate = (gs.loan_rate + gs.interest_rate/100/12)*12*100
-        draw_text(screen, f"Effektiver Jahreszins: {rate:.2f}%", "sm", C["yellow"], mx+16, my+68)
-        max_loan = max(0, gs.net_worth()*0.6 - gs.loan)
-        draw_text(screen, f"Max. Kreditrahmen: {fmt(max_loan)}", "sm", C["cyan"], mx+16, my+90)
-        if hasattr(self, '_loan_input'):
-            self._loan_input.rect.x = mx+16
-            self._loan_input.rect.y = my+120
-        else:
-            self._loan_input = InputBox(mx+16, my+120, 280, 38, "Betrag in €")
-        self._loan_input.draw(screen)
-        bw=120
-        draw_rect(screen, C["accent"], (mx+310, my+120, bw, 38), 7)
-        draw_text(screen, "Kredit aufnehmen", "sm", C["white"], mx+310+bw//2, my+139, "center")
-        draw_text(screen, "⚠️ Warnung: Hohe Schulden können zur Insolvenz führen!",
-                  "tiny", C["red"], mx+16, my+176)
+        txt(screen,f"Unternehmen {title}","lg",GOLD,bx+16,by+16)
+        if not gs.comps:
+            txt(screen,"Keine Unternehmen vorhanden.","md",MUTED,bx+16,by+60)
+            return
+        row_h = 64
+        view = screen.subsurface(pygame.Rect(bx, by+50, mw, mh-60))
+        for i,c in enumerate(gs.comps):
+            ry = i*row_h - self._scroll
+            if ry+row_h<0 or ry>mh-60: continue
+            sv = c["val"]*0.88
+            box(view,PANEL2,(8,ry,mw-16,row_h-4),7)
+            box(view,BORDER,(8,ry,mw-16,row_h-4),7,1)
+            txt(view,f"{c['name']}  (Lvl {c['level']})","md",WHITE,18,ry+10)
+            txt(view,f"Verkaufswert: {fmt(sv)}  |  Gewinn: {fmt(c['profit'])}/Monat","xs",MUTED,18,ry+34)
+            box(view,btn_color,(mw-112,ry+16,90,30),6)
+            txt(view,btn_label,"sm",WHITE,mw-67,ry+31,"center")
 
-    def _modal_repay(self, mx, my, mw, mh):
+    def _draw_m_upg_comp(self, bx, by, mw, mh):
         gs = self.gs
-        draw_text(screen, "💸 Kredit tilgen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Schulden: {fmt(gs.loan)}", "sm", C["red"], mx+16, my+46)
-        draw_text(screen, f"Bargeld: {fmt(gs.cash)}", "sm", C["cyan"], mx+16, my+68)
-        if not hasattr(self,'_repay_input') or self._repay_input.rect.x != mx+16:
-            self._repay_input = InputBox(mx+16, my+110, 280, 38, "Betrag in €")
-        self._repay_input.rect.x = mx+16; self._repay_input.rect.y = my+110
-        self._repay_input.draw(screen)
-        draw_rect(screen, C["green"], (mx+310, my+110, 120, 38), 7)
-        draw_text(screen, "Tilgen", "sm", C["white"], mx+370, my+129, "center")
-        draw_rect(screen, C["yellow"], (mx+16, my+160, 200, 34), 7)
-        draw_text(screen, "Alles tilgen", "sm", C["bg"], mx+116, my+177, "center")
+        txt(screen,"Unternehmen erweitern","lg",GOLD,bx+16,by+16)
+        txt(screen,"Kosten: 15% des Unternehmenswerts  |  +22% Gewinn, +12% Wert","xs",MUTED,bx+16,by+42)
+        if not gs.comps:
+            txt(screen,"Keine Unternehmen vorhanden.","md",MUTED,bx+16,by+70)
+            return
+        row_h = 72
+        view = screen.subsurface(pygame.Rect(bx, by+50, mw, mh-60))
+        for i,c in enumerate(gs.comps):
+            ry  = i*row_h - self._scroll
+            if ry+row_h<0 or ry>mh-60: continue
+            cost  = c["val"]*0.15
+            maxed = c["level"] >= c["lvl_max"]
+            can   = gs.cash >= cost and not maxed
+            box(view,PANEL2,(8,ry,mw-16,row_h-4),7)
+            box(view,BORDER,(8,ry,mw-16,row_h-4),7,1)
+            txt(view,c["name"],"md",WHITE,18,ry+10)
+            txt(view,f"Level {c['level']}/{c['lvl_max']}  |  Kosten: {fmt(cost)}  |  Gewinn: {fmt(c['profit'])}/Monat","xs",MUTED,18,ry+32)
+            progress_bar(view, 18, ry+52, 200, 6, c["level"]/c["lvl_max"], PURPLE)
+            if maxed:
+                box(view,BORDER,(mw-112,ry+22,90,28),6)
+                txt(view,"Max Level","xs",MUTED,mw-67,ry+36,"center")
+            else:
+                box(view,ACCENT if can else BORDER,(mw-112,ry+22,90,28),6)
+                txt(view,"Erweitern" if can else "Kein Geld","xs",WHITE,mw-67,ry+36,"center")
 
-    def _modal_savings(self, mx, my, mw, mh):
+    def _draw_m_loan(self, bx, by, mw, mh):
         gs = self.gs
-        draw_text(screen, "🏦 Festgeld-Konto", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Einlage: {fmt(gs.savings)}", "sm", C["cyan"], mx+16, my+46)
-        rate_pa = gs.savings_rate*12*100
-        draw_text(screen, f"Zinsen: {rate_pa:.2f}% p.a. = {fmt(gs.savings*gs.savings_rate)}/Monat", "sm", C["green"], mx+16, my+68)
-        draw_text(screen, f"Bargeld: {fmt(gs.cash)}", "sm", C["muted"], mx+16, my+90)
-        if not hasattr(self,'_sav_input') or self._sav_input.rect.x != mx+16:
-            self._sav_input = InputBox(mx+16, my+130, 280, 38, "Betrag einzahlen")
-        self._sav_input.rect.x = mx+16; self._sav_input.rect.y = my+130
-        self._sav_input.draw(screen)
-        draw_rect(screen, C["accent"], (mx+310, my+130, 100, 38), 7)
-        draw_text(screen, "Einzahlen", "sm", C["white"], mx+360, my+149, "center")
+        txt(screen,"Kredit aufnehmen","lg",GOLD,bx+16,by+16)
+        max_l = max(0, gs.net_worth()*0.6 - gs.loan)
+        rate  = (gs.loan_rate + gs.base_rate/100/12)*12*100
+        txt(screen,f"Aktuelle Schulden: {fmt(gs.loan)}","sm",RED,bx+16,by+50)
+        txt(screen,f"Max. Kreditrahmen: {fmt(max_l)}","sm",CYAN,bx+16,by+74)
+        txt(screen,f"Eff. Jahreszins: {rate:.2f}%","sm",YELLOW,bx+16,by+98)
+        ib = self._inputs["amount"]
+        ib.rect = pygame.Rect(bx+30, by+128, 220, 34)
+        ib.draw(screen)
+        box(screen,ACCENT,(bx+260,by+128,120,34),7)
+        txt(screen,"Aufnehmen","sm",WHITE,bx+320,by+145,"center")
+        txt(screen,"Warnung: Hohe Schulden fuehren zu Bankrott!","xs",RED,bx+16,by+178)
+
+    def _draw_m_repay(self, bx, by, mw, mh):
+        gs = self.gs
+        txt(screen,"Kredit tilgen","lg",GOLD,bx+16,by+16)
+        txt(screen,f"Offene Schulden: {fmt(gs.loan)}","sm",RED,bx+16,by+50)
+        txt(screen,f"Verfuegbares Bargeld: {fmt(gs.cash)}","sm",CYAN,bx+16,by+74)
+        ib = self._inputs["amount"]
+        ib.rect = pygame.Rect(bx+30, by+128, 220, 34)
+        ib.draw(screen)
+        box(screen,GREEN,(bx+260,by+128,120,34),7)
+        txt(screen,"Tilgen","sm",WHITE,bx+320,by+145,"center")
+        box(screen,YELLOW,(bx+30,by+180,160,34),7)
+        txt(screen,"Alles tilgen","sm",BG,bx+110,by+197,"center")
+
+    def _draw_m_savings(self, bx, by, mw, mh):
+        gs = self.gs
+        txt(screen,"Festgeld-Konto","lg",GOLD,bx+16,by+16)
+        rate = gs.sav_rate*12*100
+        txt(screen,f"Einlage: {fmt(gs.savings)}","sm",CYAN,bx+16,by+50)
+        txt(screen,f"Zins: {rate:.2f}% pa = {fmt(gs.savings*gs.sav_rate)}/Monat","sm",GREEN,bx+16,by+74)
+        txt(screen,f"Bargeld: {fmt(gs.cash)}","sm",MUTED,bx+16,by+98)
+        ib = self._inputs["amount"]
+        ib.rect = pygame.Rect(bx+30, by+128, 220, 34)
+        ib.draw(screen)
+        box(screen,ACCENT,(bx+260,by+128,120,34),7)
+        txt(screen,"Einzahlen","sm",WHITE,bx+320,by+145,"center")
         if gs.savings > 0:
-            draw_rect(screen, C["yellow"], (mx+16, my+184, 120, 34), 7)
-            draw_text(screen, "Auszahlen", "sm", C["bg"], mx+76, my+201, "center")
+            box(screen,YELLOW,(bx+30,by+180,160,34),7)
+            txt(screen,"Auszahlen","sm",BG,bx+110,by+197,"center")
 
-    def _modal_sell_prop(self, mx, my, mw, mh):
+    def _draw_m_stock(self, bx, by, mw, mh):
         gs = self.gs
-        draw_text(screen, "💸 Immobilie verkaufen", "lg", C["gold"], mx+16, my+16)
-        if not gs.properties:
-            draw_text(screen, "Keine Immobilien vorhanden.", "md", C["muted"], mx+16, my+60)
-            return
-        row_h = 62
-        for i, p in enumerate(gs.properties):
-            py = my+54 + i*row_h
-            if py+row_h > my+mh-10: break
-            sv = p.sell_value()
-            draw_rect(screen, C["panel2"], (mx+14, py, mw-28, row_h-6), 7)
-            draw_text(screen, f"{p.icon} {p.name} (Lvl {p.level})", "md", C["white"], mx+24, py+10)
-            draw_text(screen, f"Verkaufswert: {fmt(sv)}  (5% Maklergebühr)", "tiny", C["muted"], mx+24, py+34)
-            draw_text(screen, f"Netto/Monat: {fmt(p.net_monthly)}", "tiny", C["cyan"], mx+24, py+48)
-            draw_rect(screen, C["red"], (mx+mw-100, py+14, 72, 28), 6)
-            draw_text(screen, "Verkaufen", "sm", C["white"], mx+mw-64, py+28, "center")
+        mt  = self.modal["type"]
+        sid = self.modal["sid"]
+        s   = gs.stock_data[sid]
+        qty_owned = gs.stocks.get(sid,0)
+        label = "Aktie kaufen" if mt=="buy_stock" else "Aktie verkaufen"
+        txt(screen,label,"lg",GOLD,bx+16,by+16)
+        txt(screen,f"{s['name']}  |  Kurs: {fmt(s['price'])}  |  Div: {s['div']*100:.1f}% pa","md",WHITE,bx+16,by+50)
+        txt(screen,f"Im Besitz: {qty_owned:.0f} Stk = {fmt(qty_owned*s['price'])}","sm",CYAN,bx+16,by+76)
+        txt(screen,f"Bargeld: {fmt(gs.cash)}","sm",MUTED,bx+16,by+100)
+        ib = self._inputs["qty"]
+        ib.rect = pygame.Rect(bx+30, by+130, 180, 34)
+        ib.draw(screen)
+        bc = ACCENT if mt=="buy_stock" else RED
+        box(screen,bc,(bx+220,by+130,110,34),7)
+        txt(screen,"Kaufen" if mt=="buy_stock" else "Verkaufen","sm",WHITE,bx+275,by+147,"center")
+        if mt=="sell_stock" and qty_owned > 0:
+            box(screen,YELLOW,(bx+30,by+180,160,34),7)
+            txt(screen,"Alles verkaufen","sm",BG,bx+110,by+197,"center")
+        # Sparkline
+        if len(s["hist"]) >= 2:
+            sparkline(screen,s["hist"],bx+30,by+240,mw-60,120)
+            txt(screen,"Kursverlauf (letzte 40 Perioden)","xs",MUTED,bx+30,by+228)
 
-    def _modal_sell_comp(self, mx, my, mw, mh):
+    def _draw_m_etf(self, bx, by, mw, mh):
         gs = self.gs
-        draw_text(screen, "💸 Unternehmen verkaufen", "lg", C["gold"], mx+16, my+16)
-        if not gs.companies:
-            draw_text(screen, "Keine Unternehmen vorhanden.", "md", C["muted"], mx+16, my+60)
-            return
-        row_h = 62
-        for i, c in enumerate(gs.companies):
-            py = my+54 + i*row_h
-            if py+row_h > my+mh-10: break
-            sv = c.sell_value()
-            draw_rect(screen, C["panel2"], (mx+14, py, mw-28, row_h-6), 7)
-            draw_text(screen, f"{c.icon} {c.name} (Lvl {c.level})", "md", C["white"], mx+24, py+10)
-            draw_text(screen, f"Verkaufswert: {fmt(sv)}", "tiny", C["muted"], mx+24, py+34)
-            draw_text(screen, f"Gewinn/Monat: {fmt(c.profit)}", "tiny", C["green"], mx+24, py+48)
-            draw_rect(screen, C["red"], (mx+mw-100, py+14, 72, 28), 6)
-            draw_text(screen, "Verkaufen", "sm", C["white"], mx+mw-64, py+28, "center")
+        txt(screen,"Welt-ETF kaufen / verkaufen","lg",GOLD,bx+16,by+16)
+        txt(screen,f"Kurs: {fmt(gs.etf_price)}  |  Im Besitz: {gs.etf:.1f} Anteile = {fmt(gs.etf*gs.etf_price)}","md",WHITE,bx+16,by+50)
+        txt(screen,"Diversifiziert, geringes Risiko, Dividende: 2.4% pa","sm",GREEN,bx+16,by+76)
+        txt(screen,f"Bargeld: {fmt(gs.cash)}","sm",MUTED,bx+16,by+100)
+        ib = self._inputs["qty"]
+        ib.rect = pygame.Rect(bx+30, by+130, 180, 34)
+        ib.draw(screen)
+        box(screen,ACCENT,(bx+220,by+130,110,34),7)
+        txt(screen,"Kaufen","sm",WHITE,bx+275,by+147,"center")
+        if gs.etf > 0:
+            box(screen,RED,(bx+30,by+180,180,34),7)
+            txt(screen,"Alle Anteile verkaufen","sm",WHITE,bx+120,by+197,"center")
+        if len(gs.etf_hist) >= 2:
+            sparkline(screen,gs.etf_hist,bx+30,by+240,mw-60,100)
 
-    def _modal_upg_prop(self, mx, my, mw, mh):
-        gs = self.gs
-        draw_text(screen, "🔨 Immobilie renovieren", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, "Upgrade: +15% Miete, +8% Wert, +6% Kosten", "tiny", C["muted"], mx+16, my+44)
-        if not gs.properties:
-            draw_text(screen, "Keine Immobilien vorhanden.", "md", C["muted"], mx+16, my+70)
-            return
-        row_h = 68
-        for i, p in enumerate(gs.properties):
-            py = my+64 + i*row_h
-            if py+row_h > my+mh-10: break
-            cost = p.upgrade_cost()
-            maxed = p.level >= p.lvl_max
-            can = gs.cash >= cost and not maxed
-            draw_rect(screen, C["panel2"], (mx+14, py, mw-28, row_h-6), 7)
-            lvl_str = f"Lvl {p.level}/{p.lvl_max}"
-            draw_text(screen, f"{p.icon} {p.name}  {lvl_str}", "md", C["white"], mx+24, py+10)
-            draw_text(screen, f"Miete: {fmt(p.rent)}/Monat | Kosten: {fmt(cost)}", "tiny", C["muted"], mx+24, py+34)
-            # Level-Bar
-            draw_bar(screen, mx+24, py+50, 200, 8, p.level/p.lvl_max, C["accent"])
-            if maxed:
-                draw_rect(screen, C["border"], (mx+mw-110, py+16, 82, 28), 6)
-                draw_text(screen, "Max Level", "tiny", C["muted"], mx+mw-69, py+30, "center")
-            else:
-                draw_rect(screen, C["accent"] if can else C["border"], (mx+mw-110, py+16, 82, 28), 6)
-                draw_text(screen, f"Upg. {fmt(cost)}" if can else "Kein $", "tiny", C["white"], mx+mw-69, py+30, "center")
-
-    def _modal_upg_comp(self, mx, my, mw, mh):
-        gs = self.gs
-        draw_text(screen, "🚀 Unternehmen erweitern", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, "Upgrade: +22% Gewinn, +12% Bewertung, +8% Kosten", "tiny", C["muted"], mx+16, my+44)
-        if not gs.companies:
-            draw_text(screen, "Keine Unternehmen vorhanden.", "md", C["muted"], mx+16, my+70)
-            return
-        row_h = 68
-        for i, c in enumerate(gs.companies):
-            py = my+64 + i*row_h
-            if py+row_h > my+mh-10: break
-            cost = c.upgrade_cost()
-            maxed = c.level >= c.lvl_max
-            can = gs.cash >= cost and not maxed
-            draw_rect(screen, C["panel2"], (mx+14, py, mw-28, row_h-6), 7)
-            draw_text(screen, f"{c.icon} {c.name}  Lvl {c.level}/{c.lvl_max}", "md", C["white"], mx+24, py+10)
-            draw_text(screen, f"Gewinn: {fmt(c.profit)}/Monat | Upg.-Kosten: {fmt(cost)}", "tiny", C["muted"], mx+24, py+34)
-            draw_bar(screen, mx+24, py+50, 200, 8, c.level/c.lvl_max, C["accent2"])
-            if maxed:
-                draw_rect(screen, C["border"], (mx+mw-110, py+16, 82, 28), 6)
-                draw_text(screen, "Max Level", "tiny", C["muted"], mx+mw-69, py+30, "center")
-            else:
-                draw_rect(screen, C["accent"] if can else C["border"], (mx+mw-110, py+16, 82, 28), 6)
-                draw_text(screen, "Erweitern" if can else "Kein $", "tiny", C["white"], mx+mw-69, py+30, "center")
-
-    def _modal_buy_stock(self, mx, my, mw, mh):
-        gs = self.gs
-        draw_text(screen, "📈 Aktie kaufen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Bargeld: {fmt(gs.cash)}", "sm", C["cyan"], mx+16, my+44)
-        idx = self.modal.get("idx", 0)
-        s = gs.stocks[idx]
-        draw_text(screen, f"{s.icon} {s.name}  |  {fmt(s.price)}/Aktie  |  Div: {s.div*100:.1f}%", "md", C["white"], mx+16, my+72)
-        if not hasattr(self,'_stock_input') or self._stock_input.rect.x != mx+16:
-            self._stock_input = InputBox(mx+16, my+116, 200, 38, "Anzahl Aktien")
-        self._stock_input.rect.x = mx+16; self._stock_input.rect.y = my+116
-        self._stock_input.draw(screen)
-        qty_val = self._stock_input.value()
-        total = qty_val * s.price
-        draw_text(screen, f"Gesamt: {fmt(total)}", "sm", C["cyan"], mx+16, my+166)
-        can = gs.cash >= total and qty_val > 0
-        draw_rect(screen, C["accent"] if can else C["border"], (mx+230, my+116, 110, 38), 7)
-        draw_text(screen, "Kaufen", "sm", C["white"], mx+285, my+135, "center")
-        qty_owned = gs.stock_qty.get(s.sid, 0)
-        if qty_owned > 0:
-            draw_text(screen, f"Im Besitz: {qty_owned:.0f} Aktien = {fmt(qty_owned*s.price)}",
-                      "sm", C["muted"], mx+16, my+200)
-        if len(s.hist) >= 2:
-            draw_sparkline(screen, s.hist, mx+16, my+230, mw-32, 80)
-
-    def _modal_sell_stock(self, mx, my, mw, mh):
-        gs = self.gs
-        draw_text(screen, "📉 Aktie verkaufen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Bargeld: {fmt(gs.cash)}", "sm", C["cyan"], mx+16, my+44)
-        idx = self.modal.get("idx", 0)
-        s = gs.stocks[idx]
-        qty_owned = gs.stock_qty.get(s.sid, 0)
-        draw_text(screen, f"{s.icon} {s.name}  |  Bestand: {qty_owned:.0f}", "md", C["white"], mx+16, my+72)
-        if not hasattr(self,'_ssell_input') or self._ssell_input.rect.x != mx+16:
-            self._ssell_input = InputBox(mx+16, my+116, 200, 38, "Anzahl verkaufen")
-        self._ssell_input.rect.x = mx+16; self._ssell_input.rect.y = my+116
-        self._ssell_input.draw(screen)
-        qty_val = min(self._ssell_input.value(), qty_owned)
-        total = qty_val * s.price
-        draw_text(screen, f"Erlös: {fmt(total)}", "sm", C["green"], mx+16, my+166)
-        draw_rect(screen, C["red"] if qty_val > 0 else C["border"], (mx+230, my+116, 110, 38), 7)
-        draw_text(screen, "Verkaufen", "sm", C["white"], mx+285, my+135, "center")
-
-    def _modal_buy_etf(self, mx, my, mw, mh):
-        gs = self.gs
-        draw_text(screen, "🌍 Welt-ETF kaufen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, f"Kurs: {fmt(gs.etf_price)}  |  Anteile: {gs.etf_shares:.1f}  |  Wert: {fmt(gs.etf_shares*gs.etf_price)}",
-                  "sm", C["cyan"], mx+16, my+46)
-        draw_text(screen, "Diversifiziert, geringes Risiko, 2.4% Dividende p.a.", "tiny", C["green"], mx+16, my+68)
-        if not hasattr(self,'_etf_input'):
-            self._etf_input = InputBox(mx+16, my+100, 200, 38, "Anzahl Anteile")
-        self._etf_input.rect.x = mx+16; self._etf_input.rect.y = my+100
-        self._etf_input.draw(screen)
-        qty = self._etf_input.value()
-        draw_text(screen, f"Kosten: {fmt(qty*gs.etf_price)}", "sm", C["cyan"], mx+16, my+150)
-        can = gs.cash >= qty*gs.etf_price and qty > 0
-        draw_rect(screen, C["accent"] if can else C["border"], (mx+230, my+100, 100, 38), 7)
-        draw_text(screen, "Kaufen", "sm", C["white"], mx+280, my+119, "center")
-        if gs.etf_shares > 0:
-            draw_rect(screen, C["red"], (mx+16, my+190, 130, 36), 7)
-            draw_text(screen, "Alle verkaufen", "sm", C["white"], mx+81, my+208, "center")
-
-    def _modal_buy_crypto(self, mx, my, mw, mh):
-        gs = self.gs
-        draw_text(screen, "₿ Krypto kaufen", "lg", C["gold"], mx+16, my+16)
-        draw_text(screen, "⚠️ Hochriskant! Kurs kann auf 0 fallen.", "tiny", C["red"], mx+16, my+44)
-        idx = self.modal.get("idx", 0)
-        c = gs.cryptos[idx]
-        price_str = f"{c.price:,.4f} €"
-        draw_text(screen, f"{c.icon} {c.name}  |  {price_str}", "md", C["white"], mx+16, my+70)
-        if not hasattr(self,'_cry_input'):
-            self._cry_input = InputBox(mx+16, my+110, 200, 38, "Menge (Dezimal ok)")
-        self._cry_input.rect.x = mx+16; self._cry_input.rect.y = my+110
-        self._cry_input.draw(screen)
-        qty = self._cry_input.value()
-        total = qty * c.price
-        draw_text(screen, f"Kosten: {fmt(total)}", "sm", C["cyan"], mx+16, my+160)
-        can = gs.cash >= total and qty > 0
-        draw_rect(screen, C["accent"] if can else C["border"], (mx+230, my+110, 100, 38), 7)
-        draw_text(screen, "Kaufen", "sm", C["white"], mx+280, my+129, "center")
-        qty_owned = gs.crypto_qty.get(c.cid, 0)
-        if qty_owned > 0:
-            draw_text(screen, f"Bestand: {qty_owned:.4f} = {fmt(qty_owned*c.price)}", "sm", C["muted"], mx+16, my+200)
-
-    def _modal_sell_crypto(self, mx, my, mw, mh):
-        gs = self.gs
-        draw_text(screen, "₿ Krypto verkaufen", "lg", C["gold"], mx+16, my+16)
-        idx = self.modal.get("idx", 0)
-        c = gs.cryptos[idx]
-        qty_owned = gs.crypto_qty.get(c.cid, 0)
-        draw_text(screen, f"{c.icon} {c.name}  |  Bestand: {qty_owned:.6f}", "md", C["white"], mx+16, my+50)
-        if not hasattr(self,'_csell_input'):
-            self._csell_input = InputBox(mx+16, my+100, 200, 38, "Menge verkaufen")
-        self._csell_input.rect.x = mx+16; self._csell_input.rect.y = my+100
-        self._csell_input.draw(screen)
-        qty = min(self._csell_input.value(), qty_owned)
-        draw_text(screen, f"Erlös: {fmt(qty*c.price)}", "sm", C["green"], mx+16, my+150)
-        draw_rect(screen, C["red"] if qty > 0 else C["border"], (mx+230, my+100, 100, 38), 7)
-        draw_text(screen, "Verkaufen", "sm", C["white"], mx+280, my+119, "center")
-        if qty_owned > 0:
-            draw_rect(screen, C["yellow"], (mx+16, my+180, 140, 36), 7)
-            draw_text(screen, "Alles verkaufen", "sm", C["bg"], mx+86, my+198, "center")
-
-    def _modal_gameover(self, mx, my, mw, mh):
-        draw_text(screen, "💀 BANKROTT", "title", C["red"], mx+mw//2, my+80, "center")
-        draw_text(screen, "Du bist zahlungsunfähig!", "lg", C["white"], mx+mw//2, my+130, "center")
-        draw_text(screen, f"Endstand: {fmt(self.gs.net_worth())}", "md", C["muted"], mx+mw//2, my+165, "center")
-        draw_text(screen, f"Monate gespielt: {(self.gs.year-2024)*12+self.gs.month}", "md", C["muted"], mx+mw//2, my+195, "center")
-        draw_rect(screen, C["accent"], (mx+mw//2-80, my+240, 160, 44), 8)
-        draw_text(screen, "Neu starten", "lg", C["white"], mx+mw//2, my+262, "center")
-
+    # ── ACHIEVEMENT POPUP ──
     def _draw_ach_popup(self):
-        title, desc, t = self._ach_popup
-        elapsed = pygame.time.get_ticks() - t
+        title,desc,t0 = self._ach_popup
+        elapsed = pygame.time.get_ticks()-t0
         if elapsed > 4000:
             self._ach_popup = None
             return
-        alpha = 255
-        if elapsed > 3000:
-            alpha = int(255 * (1 - (elapsed-3000)/1000))
-        pw, ph = 320, 60
-        px, py = W - pw - 20, H - ph - 30
-        s = pygame.Surface((pw, ph), pygame.SRCALPHA)
-        s.fill((80, 40, 140, alpha))
-        screen.blit(s, (px, py))
-        pygame.draw.rect(screen, (139,92,246), (px, py, pw, ph), 1, border_radius=8)
-        draw_text(screen, title, "md", C["gold"], px+12, py+14)
-        draw_text(screen, desc, "tiny", C["muted"], px+12, py+38)
+        alpha = 255 if elapsed < 3000 else int(255*(1-(elapsed-3000)/1000))
+        pw,ph2 = 320,58
+        px,py2 = W-pw-16, H-ph2-28
+        s = pygame.Surface((pw,ph2),pygame.SRCALPHA)
+        s.fill((80,40,140,alpha))
+        screen.blit(s,(px,py2))
+        pygame.draw.rect(screen,(139,92,246),(px,py2,pw,ph2),1,border_radius=8)
+        txt(screen,f"Erfolg: {title}","md",GOLD,px+12,py2+14)
+        txt(screen,desc,"xs",MUTED,px+12,py2+38)
 
-    # ══ EVENT HANDLER ═════════════════════════════════════════
-    def handle_event(self, event):
-        if event.type == pygame.QUIT:
-            return False
-        if event.type == pygame.VIDEORESIZE:
-            pass  # handled by RESIZABLE flag
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                self.paused = not self.paused
-            elif event.key == pygame.K_ESCAPE:
-                self.modal = None
-            elif event.key == pygame.K_F1: self.setSpeed(2000,0)
-            elif event.key == pygame.K_F2: self.setSpeed(800,1)
-            elif event.key == pygame.K_F3: self.setSpeed(300,2)
-        
-        if self.modal:
-            self._handle_modal_input(event)
-            return True
 
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            mx, my2 = event.pos
-            self._handle_click(mx, my2)
-        if event.type == pygame.MOUSEWHEEL:
-            pass  # could add scrolling later
+# ─────────────────────────────────────────────────────
+#  BANKROTT-SCREEN
+# ─────────────────────────────────────────────────────
+class BankruptScreen:
+    def __init__(self, gs: GS):
+        self.gs  = gs
+        self.btn = Btn(W//2-90, H//2+80, 180, 40, "Neu starten", GREEN, BG, "lg")
 
-        # Input-Felder bei Modale
-        for attr in ['_loan_input','_repay_input','_sav_input','_stock_input',
-                     '_ssell_input','_etf_input','_cry_input','_csell_input']:
-            if hasattr(self, attr):
-                getattr(self, attr).handle_event(event)
+    def handle(self, ev):
+        self.btn.update(pygame.mouse.get_pos())
+        if self.btn.hit(ev):
+            return "restart"
+        return None
 
-        return True
+    def draw(self, surf):
+        surf.fill(BG)
+        txt(surf,"BANKROTT","title",RED,W//2,H//2-100,"center")
+        txt(surf,"Du bist zahlungsunfaehig!","lg",WHITE,W//2,H//2-50,"center")
+        txt(surf,f"Nettovermoegen: {fmt(self.gs.net_worth())}","md",MUTED,W//2,H//2-14,"center")
+        txt(surf,f"Gespielte Monate: {(self.gs.year-2024)*12+self.gs.month}","md",MUTED,W//2,H//2+20,"center")
+        self.btn.draw(surf)
 
-    def _handle_click(self, mx, my2):
-        # Topbar Speed-Buttons
-        for i, ms in enumerate([2000, 800, 300]):
-            bx = W - 190 + i*44
-            if pygame.Rect(bx, 8, 38, 28).collidepoint(mx, my2):
-                self.speed = ms
-                self.speed_idx = i
-                return
-        # Pause
-        if pygame.Rect(W-100, 8, 90, 28).collidepoint(mx, my2):
-            self.paused = not self.paused
-            return
-        # Sidebar
-        self._handle_sidebar_click(mx, my2)
-        # Tabs
-        tx = 190 + 8
-        for i, name in enumerate(self.TAB_NAMES):
-            tw = fonts["sm"].size(name)[0] + 20
-            if pygame.Rect(tx, 46, tw, 34).collidepoint(mx, my2):
-                self.tab = i
-                return
-            tx += tw + 4
-        # Markets tab: buy/sell aktien
-        if self.tab == 2:
-            self._handle_markets_click(mx, my2)
-        if self.tab == 3:
-            self._handle_crypto_click(mx, my2)
 
-    def _handle_sidebar_click(self, mx, my2):
-        if mx > 190: return
-        sections = [
-            ("ÜBERSICHT", [("📊 Dashboard", 0), ("🌍 Wirtschaft", 1)]),
-            ("INVESTIEREN", [("🏠 Immobilien", "prop"), ("🏭 Unternehmen", "comp"),
-                             ("📈 Märkte", 2), ("₿ Krypto", 3)]),
-            ("FINANZEN", [("💳 Kredit", "loan"), ("💸 Tilgen", "repay"),
-                          ("🏦 Festgeld", "savings")]),
-            ("SONSTIGES", [("🏆 Erfolge", 4), ("📜 Log", 5)]),
-        ]
-        y = 46+10
-        for _, items in sections:
-            y += 16
-            for label, action in items:
-                r = pygame.Rect(5, y, 180, 28)
-                if r.collidepoint(mx, my2):
-                    if isinstance(action, int):
-                        self.tab = action
-                    else:
-                        self._open_action_modal(action)
-                    return
-                y += 32
-            y += 6
+# ─────────────────────────────────────────────────────
+#  HAUPTSCHLEIFE
+# ─────────────────────────────────────────────────────
+def main():
+    state = "name"
+    name_screen   = NameScreen()
+    game_screen   = None
+    bankr_screen  = None
+    gs            = None
 
-    def _open_action_modal(self, action):
-        self.paused = True
-        if action == "prop":    self.modal = {"type":"prop"}
-        elif action == "comp":  self.modal = {"type":"comp"}
-        elif action == "loan":  self.modal = {"type":"loan"}
-        elif action == "repay": self.modal = {"type":"repay"}
-        elif action == "savings":self.modal = {"type":"savings"}
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if ev.type == pygame.VIDEORESIZE:
+                global W, H
+                W, H = ev.w, ev.h
 
-    def _handle_markets_click(self, mx, my2):
-        """Klick auf Aktien in Märkte-Tab → Kauf/Verkauf Modal."""
-        x, y = 190, 46+34+1
-        pad, col_w = 10, (W-190-pad*3)//2
-        row_h = 52
-        sy = y + 22
-        for i, s in enumerate(self.gs.stocks):
-            sx2 = x+pad + (i%2)*(col_w+pad)
-            sy2 = sy + (i//2)*row_h
-            r = pygame.Rect(sx2, sy2, col_w, row_h-4)
-            if r.collidepoint(mx, my2):
-                # Rechts-Klick = Verkaufen, Links = Kaufen
-                if mx > sx2 + col_w*0.7:
-                    self.modal = {"type":"sell_stock","idx":i}
+            if state == "name":
+                result = name_screen.handle(ev)
+                if result:
+                    gs = GS()
+                    gs.name = result
+                    gs.add_log(f"Willkommen, {gs.name}! Startkapital: {fmt(gs.cash)}", "info")
+                    gs.add_news("Spielstart! Viel Erfolg beim Investieren.")
+                    game_screen = GameScreen(gs)
+                    state = "game"
+
+            elif state == "game":
+                if ev.type == pygame.MOUSEWHEEL:
+                    game_screen.handle_scroll(ev)
                 else:
-                    self.modal = {"type":"buy_stock","idx":i}
-                self.paused = True
-                return
-        # ETF
-        ey = sy + 4*row_h + 8
-        if pygame.Rect(x+pad, ey, W-190-pad*2, 68).collidepoint(mx, my2):
-            self.modal = {"type":"buy_etf"}
-            self.paused = True
+                    result = game_screen.handle(ev)
+                    if result == "bankrott":
+                        bankr_screen = BankruptScreen(gs)
+                        state = "bankrott"
 
-    def _handle_crypto_click(self, mx, my2):
-        x, y = 190, 46+34+40+1
-        pad = 12; row_h = 90
-        for i, c in enumerate(self.gs.cryptos):
-            cy2 = y + i*row_h
-            r = pygame.Rect(x+pad, cy2, W-190-pad*2, row_h-8)
-            if r.collidepoint(mx, my2):
-                if mx > x + (W-190)*0.6:
-                    self.modal = {"type":"sell_crypto","idx":i}
-                else:
-                    self.modal = {"type":"buy_crypto","idx":i}
-                self.paused = True
-                return
+            elif state == "bankrott":
+                result = bankr_screen.handle(ev)
+                if result == "restart":
+                    state = "name"
+                    name_screen = NameScreen()
 
-    def _handle_modal_input(self, event):
-        m = self.modal
-        if m is None: return
-        mt = m.get("type","")
+        if state == "name":
+            name_screen.draw(screen)
 
-        # Input-Box Events weiterleiten
-        for attr in ['_loan_input','_repay_input','_sav_input','_stock_input',
-                     '_ssell_input','_etf_input','_cry_input','_csell_input']:
-            if hasattr(self, attr):
-                getattr(self, attr).handle_event(event)
+        elif state == "game":
+            result = game_screen.maybe_tick()
+            if result == "bankrott":
+                bankr_screen = BankruptScreen(gs)
+                state = "bankrott"
+            else:
+                game_screen.draw()
 
-        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
-            return
-        mx, my2 = event.pos
-        mw, mh = min(700, W-40), min(560, H-60)
-        bx2, by2 = (W-mw)//2, (H-mh)//2
+        elif state == "bankrott":
+            bankr_screen.draw(screen)
 
-        if mt == "prop":   self._click_modal_prop(mx, my2, bx2, by2, mw, mh)
-        elif mt == "comp": self._click_modal_comp(mx, my2, bx2, by2, mw, mh)
-        elif mt == "loan": self._click_modal_loan(mx, my2, bx2, by2, mw)
-        elif mt == "repay":self._click_modal_repay(mx, my2, bx2, by2, mw)
-        elif mt == "savings":self._click_modal_savings(mx, my2, bx2, by2, mw)
-        elif mt == "sell_prop": self._click_modal_sell_prop(mx, my2, bx2, by2, mw)
-        elif mt == "sell_comp": self._click_modal_sell_comp(mx, my2, bx2, by2, mw)
-        elif mt == "upg_prop":  self._click_modal_upg_prop(mx, my2, bx2, by2, mw)
-        elif mt == "upg_comp":  self._click_modal_upg_comp(mx, my2, bx2, by2, mw)
-        elif mt == "buy_stock": self._click_modal_buy_stock(mx, my2, bx2, by2, mw)
-        elif mt == "sell_stock":self._click_modal_sell_stock(mx, my2, bx2, by2, mw)
-        elif mt == "buy_etf":   self._click_modal_buy_etf(mx, my2, bx2, by2, mw)
-        elif mt == "buy_crypto":self._click_modal_buy_crypto(mx, my2, bx2, by2, mw)
-        elif mt == "sell_crypto":self._click_modal_sell_crypto(mx, my2, bx2, by2, mw)
-        elif mt == "gameover":
-            if pygame.Rect(bx2+mw//2-80, by2+240, 160, 44).collidepoint(mx, my2):
-                self.__init__()  # Neustart
-
-        # Schließen
-        if pygame.Rect(bx2+mw-34, by2+6, 26, 26).collidepoint(mx, my2):
-            self.modal = None
-            self.paused = False
-
-    def _buy_prop(self, idx):
-        gs = self.gs
-        tid, name, icon, price, rent, maint, lvl = PROP_CATALOG[idx]
-        if gs.cash < price: return
-        gs.cash -= price
-        if price >= 1_000_000: gs._big_spend = True
-        gs.properties.append(Property(tid, name, icon, float(price), float(rent), float(maint), lvl_max=lvl))
-        gs.add_log(f"✅ {icon} {name} gekauft für {fmt(price)}", "good")
-        gs.add_news(f"🏠 Neuer Immobilienkauf: {name}")
-        self._check_achievements()
-        self.modal = None; self.paused = False
-
-    def _buy_comp(self, idx):
-        gs = self.gs
-        tid, name, icon, price, profit, maint, risk, lvl = COMP_CATALOG[idx]
-        if gs.cash < price: return
-        gs.cash -= price
-        if price >= 1_000_000: gs._big_spend = True
-        c = Company(tid, name, icon, float(price), float(profit), float(maint), risk, lvl_max=lvl)
-        gs.companies.append(c)
-        gs.add_log(f"✅ {icon} {name} gegründet für {fmt(price)}", "good")
-        gs.add_news(f"🏭 Neue Firmengründung: {name}")
-        self._check_achievements()
-        self.modal = None; self.paused = False
-
-    def _click_modal_prop(self, mx, my2, bx2, by2, mw, mh):
-        row_h, pad = 68, 16
-        for i in range(len(PROP_CATALOG)):
-            py = by2+66 + i*row_h
-            bw = 80; bxb = bx2+mw-pad-bw-10
-            if pygame.Rect(bxb, py+18, bw, 30).collidepoint(mx, my2):
-                self._buy_prop(i); return
-        # Kontextbuttons
-        for label, modal_type in [("Verkaufen", "sell_prop"), ("Renovieren", "upg_prop")]:
-            pass  # handled via sidebar later
-
-    def _click_modal_comp(self, mx, my2, bx2, by2, mw, mh):
-        row_h, pad = 68, 16
-        for i in range(len(COMP_CATALOG)):
-            py = by2+66 + i*row_h
-            bw = 80; bxb = bx2+mw-pad-bw-10
-            if pygame.Rect(bxb, py+18, bw, 30).collidepoint(mx, my2):
-                self._buy_comp(i); return
-
-    def _click_modal_loan(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        if pygame.Rect(bx2+310, by2+120, 120, 38).collidepoint(mx, my2):
-            amt = self._loan_input.value()
-            max_l = max(0, gs.net_worth()*0.6 - gs.loan)
-            if 0 < amt <= max_l:
-                gs.cash += amt; gs.loan += amt
-                gs.add_log(f"💳 Kredit aufgenommen: +{fmt(amt)}", "warn")
-                self.modal = None; self.paused = False
-
-    def _click_modal_repay(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        if pygame.Rect(bx2+310, by2+110, 120, 38).collidepoint(mx, my2):
-            amt = min(self._repay_input.value(), gs.cash, gs.loan)
-            if amt > 0:
-                gs.cash -= amt; gs.loan = max(0, gs.loan - amt)
-                gs.add_log(f"✅ Kredit getilgt: -{fmt(amt)}", "good")
-                self.modal = None; self.paused = False
-        if pygame.Rect(bx2+16, by2+160, 200, 34).collidepoint(mx, my2):
-            amt = min(gs.cash, gs.loan)
-            if amt > 0:
-                gs.cash -= amt; gs.loan = max(0, gs.loan - amt)
-                gs.add_log(f"✅ Alles getilgt: -{fmt(amt)}", "good")
-                self.modal = None; self.paused = False
-
-    def _click_modal_savings(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        if pygame.Rect(bx2+310, by2+130, 100, 38).collidepoint(mx, my2):
-            amt = self._sav_input.value()
-            if 0 < amt <= gs.cash:
-                gs.cash -= amt; gs.savings += amt
-                gs.add_log(f"🏦 Festgeld eingelegt: {fmt(amt)}", "info")
-                self.modal = None; self.paused = False
-        if gs.savings > 0 and pygame.Rect(bx2+16, by2+184, 120, 34).collidepoint(mx, my2):
-            gs.cash += gs.savings
-            gs.add_log(f"🏦 Festgeld ausgezahlt: {fmt(gs.savings)}", "info")
-            gs.savings = 0
-            self.modal = None; self.paused = False
-
-    def _click_modal_sell_prop(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        row_h = 62
-        for i, p in enumerate(gs.properties):
-            py = by2+54 + i*row_h
-            if pygame.Rect(bx2+mw-100, py+14, 72, 28).collidepoint(mx, my2):
-                sv = p.sell_value()
-                gs.cash += sv
-                gs.properties.pop(i)
-                gs.add_log(f"💸 {p.name} verkauft für {fmt(sv)}", "info")
-                self.modal = None; self.paused = False; return
-
-    def _click_modal_sell_comp(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        row_h = 62
-        for i, c in enumerate(gs.companies):
-            py = by2+54 + i*row_h
-            if pygame.Rect(bx2+mw-100, py+14, 72, 28).collidepoint(mx, my2):
-                sv = c.sell_value()
-                gs.cash += sv
-                gs.companies.pop(i)
-                gs.add_log(f"💸 {c.name} verkauft für {fmt(sv)}", "info")
-                self.modal = None; self.paused = False; return
-
-    def _click_modal_upg_prop(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        row_h = 68
-        for i, p in enumerate(gs.properties):
-            py = by2+64 + i*row_h
-            cost = p.upgrade_cost()
-            if (not p.level >= p.lvl_max and
-                    pygame.Rect(bx2+mw-110, py+16, 82, 28).collidepoint(mx, my2)):
-                if gs.cash >= cost:
-                    gs.cash -= cost
-                    p.upgrade()
-                    gs.add_log(f"🔨 {p.name} renoviert (Lvl {p.level})", "good")
-                    self.modal = None; self.paused = False; return
-
-    def _click_modal_upg_comp(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        row_h = 68
-        for i, c in enumerate(gs.companies):
-            py = by2+64 + i*row_h
-            cost = c.upgrade_cost()
-            if (not c.level >= c.lvl_max and
-                    pygame.Rect(bx2+mw-110, py+16, 82, 28).collidepoint(mx, my2)):
-                if gs.cash >= cost:
-                    gs.cash -= cost
-                    c.upgrade()
-                    gs.add_log(f"🚀 {c.name} erweitert (Lvl {c.level})", "good")
-                    self.modal = None; self.paused = False; return
-
-    def _click_modal_buy_stock(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        if pygame.Rect(bx2+230, by2+116, 110, 38).collidepoint(mx, my2):
-            idx = self.modal.get("idx",0)
-            s = gs.stocks[idx]
-            qty = int(self._stock_input.value())
-            cost = qty * s.price
-            if qty > 0 and gs.cash >= cost:
-                gs.cash -= cost
-                gs.stock_qty[s.sid] = gs.stock_qty.get(s.sid,0) + qty
-                gs.add_log(f"📈 {qty}× {s.name} gekauft für {fmt(cost)}", "good")
-                self._check_achievements()
-                self.modal = None; self.paused = False
-
-    def _click_modal_sell_stock(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        if pygame.Rect(bx2+230, by2+116, 110, 38).collidepoint(mx, my2):
-            idx = self.modal.get("idx",0)
-            s = gs.stocks[idx]
-            qty_owned = gs.stock_qty.get(s.sid,0)
-            qty = min(int(self._ssell_input.value()), int(qty_owned))
-            if qty > 0:
-                proceeds = qty * s.price
-                gs.cash += proceeds
-                gs.stock_qty[s.sid] = qty_owned - qty
-                gs.add_log(f"📉 {qty}× {s.name} verkauft für {fmt(proceeds)}", "info")
-                self.modal = None; self.paused = False
-
-    def _click_modal_buy_etf(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        if pygame.Rect(bx2+230, by2+100, 100, 38).collidepoint(mx, my2):
-            qty = self._etf_input.value()
-            cost = qty * gs.etf_price
-            if qty > 0 and gs.cash >= cost:
-                gs.cash -= cost; gs.etf_shares += qty
-                gs.add_log(f"🌍 {qty:.1f} ETF-Anteile gekauft für {fmt(cost)}", "good")
-                self._check_achievements()
-                self.modal = None; self.paused = False
-        if gs.etf_shares > 0 and pygame.Rect(bx2+16, by2+190, 130, 36).collidepoint(mx, my2):
-            proceeds = gs.etf_shares * gs.etf_price
-            gs.cash += proceeds
-            gs.add_log(f"🌍 Alle ETF-Anteile verkauft für {fmt(proceeds)}", "info")
-            gs.etf_shares = 0
-            self.modal = None; self.paused = False
-
-    def _click_modal_buy_crypto(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        if pygame.Rect(bx2+230, by2+110, 100, 38).collidepoint(mx, my2):
-            idx = self.modal.get("idx",0)
-            c = gs.cryptos[idx]
-            qty = self._cry_input.value()
-            cost = qty * c.price
-            if qty > 0 and gs.cash >= cost:
-                gs.cash -= cost
-                gs.crypto_qty[c.cid] = gs.crypto_qty.get(c.cid,0) + qty
-                gs.add_log(f"₿ {qty:.4f}× {c.name} gekauft für {fmt(cost)}", "good")
-                self._check_achievements()
-                self.modal = None; self.paused = False
-
-    def _click_modal_sell_crypto(self, mx, my2, bx2, by2, mw):
-        gs = self.gs
-        idx = self.modal.get("idx",0)
-        c = gs.cryptos[idx]
-        qty_owned = gs.crypto_qty.get(c.cid,0)
-        if pygame.Rect(bx2+230, by2+100, 100, 38).collidepoint(mx, my2):
-            qty = min(self._csell_input.value(), qty_owned)
-            if qty > 0:
-                proceeds = qty * c.price
-                gs.cash += proceeds
-                gs.crypto_qty[c.cid] = max(0, qty_owned - qty)
-                gs.add_log(f"₿ {qty:.4f}× {c.name} verkauft für {fmt(proceeds)}", "info")
-                self.modal = None; self.paused = False
-        if qty_owned > 0 and pygame.Rect(bx2+16, by2+180, 140, 36).collidepoint(mx, my2):
-            proceeds = qty_owned * c.price
-            gs.cash += proceeds
-            gs.crypto_qty[c.cid] = 0
-            gs.add_log(f"₿ Alle {c.name} verkauft für {fmt(proceeds)}", "info")
-            self.modal = None; self.paused = False
-
-    # Kontextmenüs in Sidebar für sell/upgrade
-    def open_modal(self, mtype):
-        self.modal = {"type": mtype}
-        self.paused = True
-
-    def setSpeed(self, ms, idx):
-        self.speed = ms
-        self.speed_idx = idx
-
-    # ══ HAUPT-LOOP ════════════════════════════════════════════
-    def run(self):
-        while True:
-            for event in pygame.event.get():
-                if not self.handle_event(event):
-                    pygame.quit()
-                    sys.exit()
-            self.maybe_tick()
-            self.draw()
-            clock.tick(60)
+        pygame.display.flip()
+        clock.tick(60)
 
 
 if __name__ == "__main__":
-    game = Game()
-    # Extra Sidebar-Buttons für sell/upgrade über Klick im Dashboard
-    # (implementiert über Sidebar-Erweiterung)
-    
-    # Füge weitere Sidebar-Buttons dynamisch hinzu via Tab-Ansicht
-    game.TAB_NAMES = ["📊 Dashboard", "🌍 Wirtschaft", "📈 Märkte",
-                      "₿ Krypto", "🏆 Erfolge", "📜 Log"]
-    
-    # Starte
-    game.run()
+    main()
