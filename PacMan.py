@@ -677,15 +677,12 @@ class Ghost:
         if on_x and on_y:
             self.cx = (self.px // CELL) % COLS
             self.cy =  self.py // CELL
-
-            # Neue Richtung wählen
             d = self._choose_dir(gmap, pac_cx, pac_cy, pac_dx, pac_dy)
             if d:
                 self.dx, self.dy = d
 
         new_px = self.px + self.dx
         new_py = self.py + self.dy
-
         nc = (new_px // CELL) % COLS
         nr =  new_py // CELL
 
@@ -693,8 +690,20 @@ class Ghost:
             self.px = new_px % (COLS * CELL)
             self.py = new_py
         else:
-            # An Wand: sofort neue Richtung suchen
-            self.dx, self.dy = 0, 0
+            # BUG-FIX: Geist-in-Wand-Problem.
+            # dx/dy=0 setzen reicht nicht: on_x&on_y wuerde nie mehr True werden
+            # wenn px/py nicht exakt auf Gittergrenze liegen.
+            # Loesung: auf naechste Gittergrenze snappen, sofort neue Richtung waehlen.
+            self.px = (self.px // CELL) * CELL
+            self.py = (self.py // CELL) * CELL
+            self.cx = (self.px // CELL) % COLS
+            self.cy =  self.py // CELL
+            d = self._choose_dir(gmap, pac_cx, pac_cy, pac_dx, pac_dy)
+            if d:
+                self.dx, self.dy = d
+            else:
+                self.dx, self.dy = 0, 0
+            return
 
         self.cx = (self.px // CELL) % COLS
         self.cy =  self.py // CELL
@@ -888,16 +897,26 @@ class Game:
 
     def _draw_diff(self):
         t = self.font_l.render("SCHWIERIGKEIT", True, YELLOW)
-        self.screen.blit(t, (W//2 - t.get_width()//2, 60))
+        self.screen.blit(t, (W//2 - t.get_width()//2, 50))
         names = list(self.DIFFICULTIES.keys())
         for i, name in enumerate(names):
-            col  = GOLD if name == self.diff_name else WHITE
-            d    = self.DIFFICULTIES[name]
-            line = f"[{i+1}] {name:12s}  Geister:{d['ghost_count']}  Leben:+{d['extra_lives']}"
-            s    = self.font_m.render(line, True, col)
-            self.screen.blit(s, (W//2 - s.get_width()//2, 180 + i * 70))
-        back = self.font_s.render("BACKSPACE – zurück", True, GRAY)
-        self.screen.blit(back, (W//2 - back.get_width()//2, H - 50))
+            is_sel = (name == self.diff_name)
+            col    = GOLD if is_sel else WHITE
+            d      = self.DIFFICULTIES[name]
+            # Ausgewählte Option hervorheben
+            if is_sel:
+                pygame.draw.rect(self.screen, DKBLUE,
+                    (20, 150 + i*70 - 5, W - 40, 60), border_radius=6)
+                pygame.draw.rect(self.screen, GOLD,
+                    (20, 150 + i*70 - 5, W - 40, 60), 2, border_radius=6)
+            line = f"[{i+1}]  {name:10s}  Geister: {d['ghost_count']}   Leben: +{d['extra_lives']}"
+            s = self.font_m.render(line, True, col)
+            self.screen.blit(s, (W//2 - s.get_width()//2, 150 + i * 70))
+            if is_sel:
+                marker = self.font_m.render("◄ AKTIV", True, GOLD)
+                self.screen.blit(marker, (W - 100, 150 + i * 70))
+        hint = self.font_s.render("1-4 wählen  |  ENTER / ESC – zurück", True, GRAY)
+        self.screen.blit(hint, (W//2 - hint.get_width()//2, H - 50))
 
     def _draw_hud(self):
         y0 = ROWS * CELL + 4
@@ -1104,16 +1123,22 @@ class Game:
 
             elif self.state == "diff":
                 names = list(self.DIFFICULTIES.keys())
+                # BUG-FIX: pygame.K_1..K_4 sind korrekt (ASCII 49-52),
+                # aber wir prüfen zusätzlich auf numpad und geben visuelles
+                # Feedback: nach Auswahl direkt zurück zum Menü.
                 key_map = {
                     pygame.K_1: 0, pygame.K_2: 1,
                     pygame.K_3: 2, pygame.K_4: 3,
+                    pygame.K_KP1: 0, pygame.K_KP2: 1,
+                    pygame.K_KP3: 2, pygame.K_KP4: 3,
                 }
                 if k in key_map:
                     idx = key_map[k]
                     if idx < len(names):
                         self.diff_name = names[idx]
                         self.diff      = self.DIFFICULTIES[self.diff_name]
-                if k == pygame.K_BACKSPACE:
+                        self.state     = "menu"   # BUG-FIX: zurück zum Menü nach Auswahl
+                if k in (pygame.K_BACKSPACE, pygame.K_ESCAPE, pygame.K_RETURN):
                     self.state = "menu"
 
             elif self.state == "playing":
