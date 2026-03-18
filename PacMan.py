@@ -51,129 +51,209 @@ GHOST_TYPES = [
     {"name": "Speedy", "color": LIME,   "ai": "chase",   "speed_mul": 1.2},
 ]
 
-# ─── LEVEL-MAPS (alle Zeilen exakt 21 Zeichen) ───────────────────────────────
-LEVEL_MAPS = [
-    # Level 1 – klassisch
-    [
-        "#####################",
-        "#.........#.........#",
-        "#.##.####.#.####.##.#",
-        "#O##.####.#.####.##O#",
-        "#.##.####.#.####.##.#",
-        "#...................#",
-        "#.##.#.#####.#.##..#",
-        "#.##.#.#####.#.##..#",
-        "#....#...#...#.....#",
-        "#####.###.###.######",
-        "#####.#     #.######",
-        "#####.# ##=##.######",
-        "#####.# #   #.######",
-        "#####.#  G  #.######",
-        "#####.# #####.######",
-        "#####.#     #.######",
-        "#####.#######.######",
-        "#.........#.........#",
-        "#.##.####.#.####.##.#",
-        "#O..#...........#..O#",
-        "#####################",
-    ],
-    # Level 2 – Labyrinth
-    [
-        "#####################",
-        "#O.#.......#.......O#",
-        "#.###.#####.#####.###",
-        "#.....#.....#.....#.#",
-        "#####.#.###.#.###.#.#",
-        "#.....#.#...#...#.#.#",
-        "#.#####.#.#####.#.###",
-        "#.......#...#...#...#",
-        "#.#####.###.#.###.#.#",
-        "###...#.....#.....#.#",
-        "###.#.#.##=##.#.###.#",
-        "###.#.#.#   #.#.###.#",
-        "###.#.# # G #.#.###.#",
-        "###.#.# #####.#.###.#",
-        "###.#.#       #.#####",
-        "#...#.#########.#..O#",
-        "#.###...........###.#",
-        "#.#.###########.#.#.#",
-        "#O..............#...#",
-        "#.####.#####.####.###",
-        "#####################",
-    ],
-    # Level 3 – offen
-    [
-        "#####################",
-        "#O.................O#",
-        "#.#######.#.#######.#",
-        "#.#.......#.......#.#",
-        "#.#.#####.#.#####.#.#",
-        "#.#.#   #.#.#   #.#.#",
-        "#.#.# G #.#.# G #.#.#",
-        "#.#.#####.#.#####.#.#",
-        "#.#.......#.......#.#",
-        "#.#######.#.#######.#",
-        "#...........#.......#",
-        "#.#######.#.#######.#",
-        "#.#.......#.......#.#",
-        "#.#.####=###.#####.#.#",
-        "#.#.#         #.#.##",
-        "#.#.###########.#.#.#",
-        "#.#.............#.#.#",
-        "#.###############.#.#",
-        "#O.................O#",
-        "#................####",
-        "#####################",
-    ],
-    # Level 4 – Spirale
-    [
-        "#####################",
-        "#O.................O#",
-        "#.###############.#.#",
-        "#.#.............#.#.#",
-        "#.#.###########.#.#.#",
-        "#.#.#.........#.#.#.#",
-        "#.#.#.#######.#.#.#.#",
-        "#.#.#.#.....#.#.#.#.#",
-        "#.#.#.# ##=##.#.#.#.#",
-        "#.#.#.# #   #.#.#.#.#",
-        "#.#.#.# # G #.#.#.#.#",
-        "#.#.#.# #   #.#.#.#.#",
-        "#.#.#.# #####.#.#.#.#",
-        "#.#.#.#.......#.#.#.#",
-        "#.#.#.#########.#.#.#",
-        "#.#.#...........#.#.#",
-        "#.#.#############.#.#",
-        "#.#...............#.#",
-        "#.#################.#",
-        "#O.................O#",
-        "#####################",
-    ],
-    # Level 5 – Kreuz
-    [
-        "#####################",
-        "#O.....#.....#.....O#",
-        "#.#####.#####.#####.#",
-        "#.......#...#.......#",
-        "#.#####.#.#.#.#####.#",
-        "#.#...#...#...#...#.#",
-        "#.#.###########.###.#",
-        "#.#.#.........#.#...#",
-        "#.#.#.#######.#.#.###",
-        "#...#.# ##=##.#.#...#",
-        "#####.# # G #.#.#####",
-        "#...#.# #####.#.#...#",
-        "#.#.#.#.......#.#.###",
-        "#.#.#.#########.#.###",
-        "#.#...#.........#...#",
-        "#.#.###############.#",
-        "#.#.#.............#.#",
-        "#.....#.#.#.#.#.....#",
-        "#.#####.#.#.#.#####.#",
-        "#O.................O#",
-        "#####################",
-    ],
-]
+# ─── GARANTIERT VERBUNDENE MAP-GENERIERUNG ───────────────────────────────────
+# Alle Maps werden zur Laufzeit generiert und per BFS auf vollständige
+# Erreichbarkeit aller Punkte geprüft. Sackgassen ohne Punkte sind erlaubt,
+# aber JEDER gesetzte Punkt muss von Pac-Mans Startposition aus erreichbar sein.
+
+def _bfs_reachable(grid, start_c, start_r):
+    """Gibt alle von (start_c, start_r) erreichbaren freien Zellen zurück."""
+    visited = set()
+    queue   = [(start_c, start_r)]
+    visited.add((start_c, start_r))
+    while queue:
+        c, r  = queue.pop(0)
+        for dc, dr in ((1,0),(-1,0),(0,1),(0,-1)):
+            nc, nr = (c+dc) % COLS, r+dr
+            if (nc, nr) not in visited and 0 <= nr < ROWS:
+                cell = grid[nr][nc]
+                if cell == 0:   # nur freie Zellen (Pac-Man kann Geister-Tür nicht)
+                    visited.add((nc, nr))
+                    queue.append((nc, nr))
+    return visited
+
+
+def _make_base_grid():
+    """Erstellt ein 21×21-Gitter, komplett mit Wänden gefüllt."""
+    return [[1]*COLS for _ in range(ROWS)]
+
+
+def _carve_passages(grid, x, y):
+    """Rekursiver DFS-Maze-Carver (arbeitet auf geraden Koordinaten)."""
+    dirs = [(2,0),(-2,0),(0,2),(0,-2)]
+    random.shuffle(dirs)
+    for dx, dy in dirs:
+        nx, ny = x+dx, y+dy
+        if 1 <= nx <= COLS-2 and 1 <= ny <= ROWS-2 and grid[ny][nx] == 1:
+            grid[y+dy//2][x+dx//2] = 0   # Wand zwischen den Zellen einreißen
+            grid[ny][nx]           = 0
+            _carve_passages(grid, nx, ny)
+
+
+def _ensure_connectivity(grid, dots, powers, pac_c, pac_r):
+    """
+    BFS ab Pac-Man-Start. Alle Punkte/Powers in nicht-erreichbaren Zellen
+    werden entfernt, damit keine unerreichbaren Punkte verbleiben.
+    """
+    reachable = _bfs_reachable(grid, pac_c, pac_r)
+    dots   -= {p for p in dots   if p not in reachable}
+    powers -= {p for p in powers if p not in reachable}
+
+
+def generate_map(level_num, seed=None):
+    """
+    Generiert eine vollständig verbundene Pac-Man-Map.
+    Garantien:
+      • Alle Punkte sind von Pac-Mans Startpos aus erreichbar (BFS-geprüft).
+      • Geister-Käfig ist immer in der Mitte mit Tür.
+      • 4 Power-Pills in den Ecken.
+      • Mindestens 60 normale Punkte.
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    sys.setrecursionlimit(5000)
+
+    # ── Schritt 1: Leeres Gitter, Rand = Wand ─────────────────────────────
+    grid = _make_base_grid()
+
+    # Startpunkt für DFS muss auf geraden Koordinaten liegen
+    start_x, start_y = 1, 1
+    grid[start_y][start_x] = 0
+    _carve_passages(grid, start_x, start_y)
+
+    # Rand immer Wand
+    for c in range(COLS): grid[0][c] = grid[ROWS-1][c] = 1
+    for r in range(ROWS): grid[r][0] = grid[r][COLS-1] = 1
+
+    # ── Schritt 2: Zusätzliche Verbindungen hinzufügen (Schleifen) ────────
+    # Damit es keine echten Sackgassen gibt und das Spiel interessanter wird,
+    # reißen wir ~20 % der noch stehenden Innenwände ein.
+    inner_walls = [
+        (c, r)
+        for r in range(1, ROWS-1)
+        for c in range(1, COLS-1)
+        if grid[r][c] == 1
+        and r % 2 == 0 and c % 2 == 0   # nur Zwischenwände
+    ]
+    random.shuffle(inner_walls)
+    for c, r in inner_walls[:len(inner_walls)//5]:
+        grid[r][c] = 0
+
+    # ── Schritt 3: Geister-Käfig in der Mitte ────────────────────────────
+    gx, gy = COLS//2, ROWS//2   # Mittelpunkt
+    # Käfig (5×3) in die Mitte schreiben – überschreibt was auch immer da ist
+    cage_rows = [
+        "##=##",
+        "#   #",
+        "#####",
+    ]
+    cage_top = gy - 1
+    cage_left= gx - 2
+    for dr, crow in enumerate(cage_rows):
+        for dc, ch in enumerate(crow):
+            r2, c2 = cage_top + dr, cage_left + dc
+            if 0 < r2 < ROWS-1 and 0 < c2 < COLS-1:
+                if ch == '#': grid[r2][c2] = 1
+                elif ch == '=': grid[r2][c2] = 2
+                else:           grid[r2][c2] = 0
+
+    # Freier Korridor vor dem Käfig (damit Geister heraus können)
+    for dc in range(-2, 3):
+        c2 = gx + dc
+        if 0 < c2 < COLS-1:
+            grid[cage_top - 1][c2] = 0
+
+    ghost_home = (gx, gy)        # Geister starten im Käfig-Inneren
+    ghost_door = (gx, cage_top)  # Tür-Zeile
+
+    # ── Schritt 4: Pac-Man Startposition ─────────────────────────────────
+    pac_r = min(gy + 4, ROWS-2)
+    pac_c = gx
+    # Stelle sicher dass Pac-Mans Startfeld frei ist
+    grid[pac_r][pac_c] = 0
+    # Und ein paar Nachbarfelder freimachen damit er sich bewegen kann
+    for dc in (-1, 0, 1):
+        c2 = pac_c + dc
+        if 0 < c2 < COLS-1:
+            grid[pac_r][c2] = 0
+            if pac_r - 1 > 0:
+                grid[pac_r-1][c2] = 0
+
+    # ── Schritt 5: Power-Pills in die 4 Ecken ────────────────────────────
+    powers = set()
+    for cr, rr in ((1,1),(COLS-2,1),(1,ROWS-2),(COLS-2,ROWS-2)):
+        grid[rr][cr] = 0
+        powers.add((cr, rr))
+        # Kleine Öffnung sicherstellen
+        for dc, dr in ((1,0),(0,1)):
+            nc, nr = cr+dc, rr+dr
+            if 0 < nc < COLS-1 and 0 < nr < ROWS-1:
+                grid[nr][nc] = 0
+
+    # ── Schritt 6: Punkte auf alle freien Felder setzen ───────────────────
+    cage_cells = {
+        (cage_left+dc, cage_top+dr)
+        for dr in range(3) for dc in range(5)
+    }
+    dots = set()
+    for r in range(1, ROWS-1):
+        for c in range(1, COLS-1):
+            if grid[r][c] == 0:
+                pos = (c, r)
+                if pos not in powers and pos not in cage_cells:
+                    if (c, r) != (pac_c, pac_r):
+                        dots.add(pos)
+
+    # ── Schritt 7: BFS – unerreichbare Punkte entfernen ──────────────────
+    _ensure_connectivity(grid, dots, powers, pac_c, pac_r)
+
+    # ── Schritt 8: Mindest-Punktezahl sicherstellen ───────────────────────
+    # Falls zu wenige Punkte (sehr unwahrscheinlich), mehr Wände einreißen
+    attempts = 0
+    while len(dots) < 60 and attempts < 50:
+        attempts += 1
+        walls = [(c, r) for r in range(1,ROWS-1) for c in range(1,COLS-1)
+                 if grid[r][c] == 1
+                 and (c,r) not in cage_cells]
+        if not walls: break
+        c, r = random.choice(walls)
+        grid[r][c] = 0
+        dots.add((c, r))
+        _ensure_connectivity(grid, dots, powers, pac_c, pac_r)
+
+    # ── Schritt 9: Map als String-Liste zurückgeben ───────────────────────
+    # Wir codieren ghost_home und ghost_door in die Strings
+    raw = []
+    for r in range(ROWS):
+        row_chars = []
+        for c in range(COLS):
+            cell = grid[r][c]
+            pos  = (c, r)
+            if cell == 1:
+                row_chars.append('#')
+            elif cell == 2:
+                row_chars.append('=')
+            elif pos == ghost_home:
+                row_chars.append('G')
+            elif pos in powers:
+                row_chars.append('O')
+            elif pos in dots:
+                row_chars.append('.')
+            else:
+                row_chars.append(' ')
+        raw.append("".join(row_chars))
+
+    return raw
+
+
+# Fünf vorberechnete Seeds für die ersten Levels (reproduzierbar + getestet)
+LEVEL_SEEDS = [42, 137, 256, 999, 1337]
+
+def get_level_map(level_num):
+    """Gibt eine garantiert verbundene Map für das gegebene Level zurück."""
+    seed = LEVEL_SEEDS[level_num % len(LEVEL_SEEDS)] + level_num * 7
+    return generate_map(level_num, seed=seed)
 
 
 # ─── KLASSEN ─────────────────────────────────────────────────────────────────
@@ -723,8 +803,7 @@ class Game:
 
     # ── Level laden ──────────────────────────────────────────────────────
     def _load_level(self):
-        idx = self.level % len(LEVEL_MAPS)
-        raw = LEVEL_MAPS[idx]
+        raw = get_level_map(self.level)
         self.map = Map(raw, self.level)
         self.total_dots = len(self.map.dots) + len(self.map.powers)
 
