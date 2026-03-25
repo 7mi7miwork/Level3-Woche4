@@ -92,10 +92,25 @@ def sparkline(surf, hist, x, y, w, h, col=None):
     if len(pts) >= 2:
         pygame.draw.lines(surf, c, False, pts, 2)
 
-def progress_bar(surf, x, y, w, h, frac, color):
-    box(surf, PANEL2, (x,y,w,h), 3)
-    fw = max(0, min(w, int(w*frac)))
-    if fw > 0: box(surf, color, (x,y,fw,h), 3)
+def progress_bar(surf, x, y, w, h, value, max_value, color):
+    # 👉 Schutz gegen Division durch 0
+    if max_value <= 0:
+        frac = 0
+    else:
+        frac = value / max_value
+
+    # 👉 begrenzen
+    frac = max(0, min(1, frac))
+
+    # Hintergrund
+    box(surf, PANEL2, (x, y, w, h), 3)
+
+    # Höhe berechnen
+    fh = int(h * frac)
+
+    if fh > 0:
+        # von unten nach oben
+        box(surf, color, (x, y + (h - fh), w, fh), 3)
 
 def dim_overlay(surf):
     s = pygame.Surface((surf.get_width(), surf.get_height()), pygame.SRCALPHA)
@@ -1815,9 +1830,17 @@ class GameScreen:
                 mn2,mx2=min(gs.cf_hist),max(gs.cf_hist)
                 rng=mx2-mn2 if mx2!=mn2 else 1
                 for ii,cf in enumerate(gs.cf_hist):
-                    bx2=x+pad+10+ii*bw2; norm=(cf-mn2)/rng
-                    bh2=max(1,int(norm*barh)); c=GREEN if cf>=0 else RED
-                    screen.fill(c,pygame.Rect(bx2,bary-int((cf/rng)*barh),bw2-1,max(1,abs(int((cf/rng)*barh)))))
+                    bx2=x+pad+10+ii*bw2
+                    norm=(cf-mn2)/rng
+                    c=GREEN if cf>=0 else RED
+                    # Höhe relativ zur Mitte
+                    bar_height = int(norm * barh)
+                    if cf >= 0:
+                        # Positive Werte: Balken nach oben
+                        screen.fill(c,pygame.Rect(bx2,bary-bar_height,bw2-1,max(1,bar_height)))
+                    else:
+                        # Negative Werte: Balken nach unten
+                        screen.fill(c,pygame.Rect(bx2,bary,bw2-1,max(1,abs(bar_height))))
                 txt(screen,"Monatl. Cashflow","xs",MUTED,x+pad+10,bary-12)
 
     # ── TAB: WIRTSCHAFT ──
@@ -2057,7 +2080,7 @@ class GameScreen:
             box(view,PANEL2,(8,ry,mw-16,row_h-4),7); box(view,BORDER,(8,ry,mw-16,row_h-4),7,1)
             txt(view,f"{p['name']}","md",WHITE,18,ry+10)
             txt(view,f"Level {p['level']}/{p['lvl_max']}  |  Kosten: {fmt(cost)}","xs",MUTED,18,ry+32)
-            progress_bar(view,18,ry+52,200,6,p["level"]/p["lvl_max"],ACCENT)
+            progress_bar(view,18,ry+52,200,6,p["level"],p["lvl_max"],ACCENT)
             if maxed:
                 box(view,BORDER,(mw-112,ry+22,90,28),6); txt(view,"Max Level","xs",MUTED,mw-67,ry+36,"center")
             else:
@@ -2152,7 +2175,7 @@ class GameScreen:
             box(view,PANEL2,(8,ry,mw-16,row_h-4),7); box(view,BORDER,(8,ry,mw-16,row_h-4),7,1)
             txt(view,c["name"],"md",WHITE,18,ry+10)
             txt(view,f"Level {c['level']}/{c['lvl_max']}  |  Kosten: {fmt(cost)}  |  Gewinn: {fmt(c['profit'])}/Monat","xs",MUTED,18,ry+32)
-            progress_bar(view,18,ry+52,200,6,c["level"]/c["lvl_max"],PURPLE)
+            progress_bar(view,18,ry+52,200,6,c["level"],c["lvl_max"],PURPLE)
             if maxed:
                 box(view,BORDER,(mw-112,ry+22,90,28),6); txt(view,"Max Level","xs",MUTED,mw-67,ry+36,"center")
             else:
@@ -2249,7 +2272,7 @@ class GameScreen:
         # Fortschritt
         n=len(self.gs.achiev_done); tot=len(ACHIEVEMENTS)
         txt(screen,f"{n}/{tot} Erfolge","xs",diff_col,px+10,py2+52)
-        progress_bar(screen,px+100,py2+52,pw-120,8,n/tot,diff_col)
+        progress_bar(screen,px+100,py2+52,pw-120,8,n,tot,diff_col)
 
 
 # ─────────────────────────────────────────────────────
