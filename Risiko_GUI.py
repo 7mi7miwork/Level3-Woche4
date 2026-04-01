@@ -500,27 +500,35 @@ class RisikoGUI(tk.Tk):
         self.minimap_btn.pack(side=tk.RIGHT, padx=5)
         
         self._draw_map()
+        self._setup_tooltips()
     
     def _draw_map(self):
         """Weltkarte zeichnen"""
         self.map_canvas.delete("all")
         scale = CONFIG["map_scale"]
         
-        # Kontinente als Hintergrund
-        for cont, data in CONTINENTS.items():
-            # Einfache Polygone für Kontinente (vereinfacht)
-            territories = [t for t, d in TERRITORIES.items() if d["continent"] == cont]
-            if territories:
-                coords = []
-                for t in territories[:4]:  # Nur erste 4 für Demo
-                    coords.append(TERRITORIES[t]["pos"][0] * scale + 50)
-                    coords.append(TERRITORIES[t]["pos"][1] * scale + 50)
-                if len(coords) >= 6:
-                    self.map_canvas.create_polygon(coords, fill=data["color"], 
-                                                  outline=self.theme["border"], 
-                                                  width=1, stipple="gray12", tag="continent")
+        # Hintergrund mit Gitter (optional)
+        self.map_canvas.create_rectangle(0, 0, 1300, 800, fill=self.theme["bg_tertiary"], outline="")
         
-        # Verbindungen zwischen Gebieten
+        # Kontinenten-Regionen Labels (große Schrift)
+        continents_pos = {
+            "Nordamerika": (200, 200, 30),
+            "Südamerika": (350, 500, 25),
+            "Europa": (630, 180, 25),
+            "Afrika": (700, 450, 25),
+            "Asien": (950, 350, 30),
+            "Australien": (1050, 650, 20),
+        }
+        
+        for cont, (cx, cy, font_size) in continents_pos.items():
+            if cont in CONTINENTS:
+                color = CONTINENTS[cont]["color"]
+                # Kontinenten-Label mit halbtransparentem Hintergrund-Effekt
+                self.map_canvas.create_text(cx, cy, text=cont, 
+                                           fill=color, font=("Segoe UI", font_size, "bold"),
+                                           tag="continent_label")
+        
+        # Verbindungen zwischen Gebieten (vor den Kreisen zeichnen)
         drawn = set()
         for t_name, t_data in TERRITORIES.items():
             x1, y1 = t_data["pos"][0] * scale + 50, t_data["pos"][1] * scale + 50
@@ -532,31 +540,36 @@ class RisikoGUI(tk.Tk):
                     x2, y2 = TERRITORIES[neighbor]["pos"][0] * scale + 50, \
                             TERRITORIES[neighbor]["pos"][1] * scale + 50
                     self.map_canvas.create_line(x1, y1, x2, y2, 
-                                               fill=self.theme["border"], 
-                                               width=1, dash=(2, 2), tag="connection")
+                                               fill=self.theme["text"], 
+                                               width=1, tag="connection")
         
-        # Gebiete als Kreise
+        # Gebiete als Kreise - VIEL GRÖSSER
         self.territory_widgets = {}
         for t_name, t_data in TERRITORIES.items():
             x, y = t_data["pos"][0] * scale + 50, t_data["pos"][1] * scale + 50
-            r = 18 * scale
+            r = 25 * scale  # Größer machen!
             
-            # Kreis für Gebiet
+            # Kreis für Gebiet mit Schatten-Effekt
+            shadow = self.map_canvas.create_oval(x-r-2, y-r-2, x+r+2, y+r+2, 
+                                                fill=self.theme["border"],
+                                                outline="", tag="shadow")
+            
+            # Hauptkreis
             circle = self.map_canvas.create_oval(x-r, y-r, x+r, y+r, 
-                                                fill=self.theme["bg_secondary"],
-                                                outline=self.theme["border"], 
+                                                fill="white",
+                                                outline=self.theme["text"], 
                                                 width=2, tag=f"territory_{t_name}")
             
-            # Text-Label
-            text = self.map_canvas.create_text(x, y, text=t_name[:2].upper(), 
-                                              fill=self.theme["text"], 
-                                              font=("Segoe UI", 8, "bold"),
+            # Text-Label (Abkürzung) - VIEL GRÖSSER
+            text = self.map_canvas.create_text(x, y-5, text=t_name[:2].upper(), 
+                                              fill=self.theme["border"], 
+                                              font=("Segoe UI", 10, "bold"),
                                               tag=f"text_{t_name}")
             
             # Truppen-Counter (wird später aktualisiert)
-            troops = self.map_canvas.create_text(x, y+25, text="", 
-                                                fill=self.theme["accent2"],
-                                                font=("Segoe UI", 9, "bold"),
+            troops = self.map_canvas.create_text(x, y+20, text="0", 
+                                                fill=self.theme["accent"],
+                                                font=("Segoe UI", 10, "bold"),
                                                 tag=f"troops_{t_name}")
             
             # Klick-Events
@@ -568,13 +581,17 @@ class RisikoGUI(tk.Tk):
                                    lambda e: self.on_territory_leave())
             
             self.territory_widgets[t_name] = {
-                "circle": circle, "text": text, "troops": troops
+                "circle": circle, "text": text, "troops": troops, "shadow": shadow
             }
-            
-            # Tooltip
-            Tooltip(self.map_canvas, 
-                   f"{t_name}\n{t_data['continent']}\nNachbarn: {', '.join(t_data['neighbors'][:3])}...",
-                   delay=0.3)
+    
+    def _setup_tooltips(self):
+        """Tooltips für alle Gebiete einrichten"""
+        for t_name, t_data in TERRITORIES.items():
+            if t_name in self.territory_widgets:
+                widget = self.map_canvas
+                Tooltip(widget, 
+                       f"{t_name}\n🌍 {t_data['continent']}\n🔗 Nachbarn: {len(t_data['neighbors'])}",
+                       delay=0.3)
     
     def _create_action_panel(self):
         """Rechte Aktionsleiste"""
@@ -760,6 +777,7 @@ class RisikoGUI(tk.Tk):
         CONFIG["map_scale"] = min(2.0, CONFIG["map_scale"] + 0.1)
         self.zoom_label.config(text=f"{int(CONFIG['map_scale']*100)}%")
         self._draw_map()
+        self._setup_tooltips()
         self._update_all_territories()
     
     def zoom_out(self):
@@ -767,6 +785,7 @@ class RisikoGUI(tk.Tk):
         CONFIG["map_scale"] = max(0.5, CONFIG["map_scale"] - 0.1)
         self.zoom_label.config(text=f"{int(CONFIG['map_scale']*100)}%")
         self._draw_map()
+        self._setup_tooltips()
         self._update_all_territories()
     
     def on_drag_start(self, event):
